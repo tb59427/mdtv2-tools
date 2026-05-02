@@ -1,0 +1,61 @@
+# --- Python ---------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+*.egg-info/
+
+# --- macOS ----------------------------------------------------------------
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+.fseventsd
+.VolumeIcon.icns
+
+# --- Windows --------------------------------------------------------------
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# --- Linux ----------------------------------------------------------------
+*~
+.nfs*
+
+# --- Editors / IDEs -------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+.*.swp
+.*.swo
+*.sublime-workspace
+*.sublime-project
+.project
+.classpath
+
+# --- Local config (real one, not the example) ----------------------------
+ml-source-bridge/config.toml
+config.toml
+
+# --- Things install.sh creates if you run it inside the repo -------------
+.pymcuprog-venv/
+
+# --- Misc -----------------------------------------------------------------
+*.log
+*.bak
+*.bak-*
+.cache/
