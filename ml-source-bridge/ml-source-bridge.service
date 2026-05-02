@@ -1,0 +1,23 @@
+[Unit]
+Description=ML source bridge (AirPlay/etc. -> MasterLink source)
+Documentation=https://github.com/anthropics/claude-mdt
+Wants=mdtv2-broker.service shairport-sync.service
+After=network.target redis-server.service mdtv2-broker.service shairport-sync.service
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=1s
+# The bridge needs:
+#   - redis (TCP/Unix to localhost)
+#   - D-Bus system bus (the shairport-sync policy override grants access)
+#   - ALSA mixer (audio group)
+# It does NOT need root. Sharing /tmp/mdt.log with the broker happens
+# naturally because both run as 'mdt'.
+User=mdt
+Group=audio
+WorkingDirectory=/opt/mdt-tools/ml-source-bridge
+ExecStart=/usr/bin/python3 -u /opt/mdt-tools/ml-source-bridge/ml_source_bridge.py --config /etc/ml-source-bridge.toml
+
+[Install]
+WantedBy=multi-user.target

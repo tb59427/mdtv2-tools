@@ -1,0 +1,16 @@
+# --- mdt-tools begin ---
+# Added by mdt-tools/install.sh. Edit at your own risk; the installer
+# leaves these alone if it sees them already present, but it never
+# removes them.
+
+# Free /dev/serial0 (PL011) for the ATtiny826 UPDI/UART link. Bluetooth
+# moves to the mini-UART; we don't use BT in this project anyway.
+enable_uart=1
+dtoverlay=disable-bt
+
+# Disable the on-board HDMI/3.5mm audio so HiFiBerry is the only soundcard.
+dtparam=audio=off
+
+# Enable HiFiBerry DAC+ADC HAT (PCM5122 DAC + PCM1862 ADC over I2S+I2C).
+dtoverlay=hifiberry-dacplusadc
+# --- mdt-tools end ---

@@ -1,0 +1,21 @@
+[Unit]
+Description=mdt v2 broker (ATtiny826 <-> Redis bridge)
+Documentation=https://github.com/anthropics/claude-mdt
+Wants=redis-server.service
+After=network.target redis-server.service
+# Old single-channel ml-broker is incompatible -- we own /dev/serial0.
+Conflicts=ml-broker.service
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=1s
+# The broker only needs serial + redis; runs as the unprivileged 'mdt'
+# user. dialout group gives access to /dev/serial0 without root.
+User=mdt
+Group=dialout
+WorkingDirectory=/opt/mdt-tools/broker
+ExecStart=/usr/bin/python3 -u /opt/mdt-tools/broker/mdtv2-broker.py
+
+[Install]
+WantedBy=multi-user.target

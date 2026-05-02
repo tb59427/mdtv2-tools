@@ -1,0 +1,68 @@
+# ml-source-bridge configuration
+#
+# Copy to one of:
+#   /etc/ml-source-bridge.toml          (system-wide; preferred for systemd)
+#   <install-dir>/config.toml           (alongside the script)
+# Or pass --config PATH on the command line.
+#
+# CLI flags override values set here. Wire-level master/slave (PWR.DET pin)
+# is handled automatically by the MCU firmware; nothing in this file
+# controls it.
+
+
+# ---- ML bus role ------------------------------------------------------------
+# Which device we pretend to be on the ML bus.
+#
+#   "sc"  -- SOURCE CENTER (address 0xC2). Provides extra sources to an
+#            existing AM/VM. Typical case alongside a B&O music system.
+#
+#   "am"  -- AUDIO MASTER  (address 0xC1). Pretends to be the audio master
+#            for ML link-speakers in setups where no real AM exists.
+role = "sc"
+
+
+# ---- behaviour --------------------------------------------------------------
+# Broadcast a CLOCK telegram every 30 minutes. Harmless if the system has
+# its own clock authority; useful otherwise.
+broadcast_clock = true
+
+# Auto-wake: when a provider's audio stream starts (e.g. AirPlay session
+# begins), inject a virtual Beo4 keypress so the AM/VM switches to that
+# source automatically.
+auto_wake = true
+
+
+# ---- redis broker -----------------------------------------------------------
+redis_host = "localhost"
+redis_port = 6379
+
+
+# ---- sources ----------------------------------------------------------------
+# Each [[sources]] entry registers one ML source byte we claim, with the
+# audio backend (provider) that produces audio for it. You can register
+# multiple sources at once -- e.g. AirPlay on N.MUSIC and MPD on N.RADIO.
+#
+# Common source bytes:
+#   0x6F  RADIO    -- typical for AM-standalone linkspeaker setups
+#   0x7A  N.MUSIC  -- network music; standard slot
+#   0x8D  CD       -- the system's CD source slot
+#   0xA1  N.RADIO  -- network radio; what the legacy ml-netprovide used
+#                     and what works in a VM+AM topology with B&O Beosound
+#
+# Beo4 buttons that trigger each source (auto-wake uses these):
+#   RADIO   -> 0x81   N.MUSIC -> 0x94   CD -> 0x92   N.RADIO -> 0x93
+#
+# Available providers:
+#   "airplay"  -- shairport-sync via D-Bus (one shairport instance shared
+#                  across all airplay sources)
+
+[[sources]]
+source_byte  = 0xA1            # N.RADIO
+provider     = "airplay"
+display_name = "N.RADIO"        # optional; up to 11 chars ASCII
+
+# Uncomment to also claim N.MUSIC for a second backend:
+# [[sources]]
+# source_byte  = 0x7A           # N.MUSIC
+# provider     = "mpd"
+# display_name = "N.MUSIC"
