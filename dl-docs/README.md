@@ -8,6 +8,7 @@ slightly).
 | Subdir | Bus | Devices |
 |---|---|---|
 | `dl80-beogram/` | DL'80 (3.125 ms unit, single-byte commands) | Beogram turntables |
+| `dl86-music-system/` | DL'86 (1.562 ms unit, pulse-distance, variable-length frames) | BeoMaster / BeoSound / BeoCenter integrated music systems |
 
 The full DL'80 protocol map (every documented opcode, including ones we
 have not personally tested) lives in `Datalink 80 Protocol.xlsx` outside
