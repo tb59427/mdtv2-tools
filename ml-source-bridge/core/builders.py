@@ -639,7 +639,7 @@ def sc_extended_source_info_blob(*, source_byte: int) -> bytes:
 
 
 def sc_extended_source_info(*, source_byte: int, subtype: int,
-                            text: str, max_text: int = 40) -> bytes:
+                            text: str, max_text: int = 10) -> bytes:
     """0x0B EXTENDED_SOURCE_INFORMATION carrying ASCII text.
 
     Reproduces the byte-for-byte layout observed from a real B&O Source
@@ -665,7 +665,7 @@ def sc_extended_source_info(*, source_byte: int, subtype: int,
         A.Mem   1: Genre  2: Album  3: Artist   4: Track name
                 5: Beo4   6: "Unknown"
     """
-    text_bytes = _filter_ascii(text, max_len=max_text).encode("ascii")
+    text_bytes = _filter_ext_source_info_text(text, max_len=max_text).encode("ascii")
     # 15-byte prefix + N-byte text = 15+N bytes. pl_len declared as 14+N
     # to match real-SC's off-by-one (the captured "Pop" message has
     # pl_len=17 with 18 actual payload bytes).
@@ -688,9 +688,34 @@ _ALLOWED_NAME_CHARS = re.compile(r"[^A-Za-z0-9.\- ]")
 
 
 def _filter_ascii(s: str, max_len: int = 15) -> str:
-    """ASCII-only printable, length-clamped. Used for source/track strings
-    we shove into ML telegrams. Drops anything outside A-Za-z0-9.-space."""
+    """ASCII-only printable, length-clamped. Used for DISPLAY_SOURCE
+    source-name padding (where punctuation like the dot in 'N.RADIO'
+    is wanted). Drops anything outside A-Za-z0-9.-space."""
     return _ALLOWED_NAME_CHARS.sub("", s)[:max_len]
+
+
+# Stricter character set for EXTENDED_SOURCE_INFORMATION payloads. Real
+# BS5 SC captures only ever showed letters / digits / spaces in the
+# subtype 2..6 text fields ("Pop", "Germany", "SWR3 Lyrix", "NONE",
+# "Unknown"). Sending punctuation (or longer strings, see the 10-char
+# default cap) was observed to crash the AM watchdog -- looks like a
+# fixed-size buffer overflow on AM's parser. Going strict here is the
+# safest landing point until/unless we find a wider charset that
+# real systems demonstrably accept.
+_ESI_ALLOWED_CHARS = re.compile(r"[^A-Za-z0-9 ]")
+
+
+def _filter_ext_source_info_text(s: str, max_len: int = 10) -> str:
+    """Strict text sanitiser for EXTENDED_SOURCE_INFORMATION payloads.
+
+    Drops any character outside [A-Z a-z 0-9 space], collapses runs of
+    whitespace, strips leading/trailing whitespace, then truncates to
+    `max_len`. Default `max_len=10` matches the longest text observed in
+    real-BS5-SC captures (`SWR3 Lyrix`, 10 chars).
+    """
+    s = _ESI_ALLOWED_CHARS.sub("", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s[:max_len]
 
 
 def _pad_source_name(s: str, width: int) -> str:
