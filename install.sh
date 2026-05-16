@@ -268,11 +268,15 @@ if (( NEED_SHAIRPORT_RESTART )); then
         || warn "couldn't restart shairport-sync"
 fi
 
-# Restart already-enabled services so they pick up new code.
+# Enable + start (or restart) both services. Fresh install: enable+now.
+# Update install: restart to pick up new code.
 for svc in mdtv2-broker.service ml-source-bridge.service; do
     if systemctl is-enabled --quiet "$svc" 2>/dev/null; then
         note "restarting $svc"
         systemctl restart "$svc"
+    else
+        note "enable --now $svc"
+        systemctl enable --now "$svc"
     fi
 done
 
@@ -280,12 +284,13 @@ done
 echo
 note "install complete"
 echo
+echo "  services: $(systemctl is-active mdtv2-broker.service 2>/dev/null) mdtv2-broker, $(systemctl is-active ml-source-bridge.service 2>/dev/null) ml-source-bridge"
+echo "  logs:     sudo journalctl -u mdtv2-broker.service -u ml-source-bridge.service -f"
 if (( NEED_CONFIG_EDIT )); then
-    echo "  1. edit:   sudo \$EDITOR $BRIDGE_TOML"
-    echo "  2. enable: sudo systemctl enable --now mdtv2-broker.service ml-source-bridge.service"
-    echo "  3. logs:   sudo journalctl -u mdtv2-broker.service -u ml-source-bridge.service -f"
-elif ! systemctl is-enabled --quiet mdtv2-broker.service 2>/dev/null; then
-    echo "  enable: sudo systemctl enable --now mdtv2-broker.service ml-source-bridge.service"
+    echo
+    echo "  /etc/ml-source-bridge.toml was created with default values --"
+    echo "  edit it if you need to change source mappings / display names,"
+    echo "  then: sudo systemctl restart ml-source-bridge.service"
 fi
 echo
 echo "  flash MCU: sudo /opt/mdt-tools/mcu-firmware/flash.sh \\"

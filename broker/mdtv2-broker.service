@@ -1,6 +1,6 @@
 [Unit]
 Description=mdt v2 broker (ATtiny826 <-> Redis bridge)
-Documentation=https://github.com/anthropics/claude-mdt
+Documentation=https://labs.polyvection.com/mdt
 Wants=redis-server.service
 After=network.target redis-server.service
 # Old single-channel ml-broker is incompatible -- we own /dev/serial0.

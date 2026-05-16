@@ -1,6 +1,6 @@
 [Unit]
 Description=ML source bridge (AirPlay/etc. -> MasterLink source)
-Documentation=https://github.com/anthropics/claude-mdt
+Documentation=https://labs.polyvection.com/mdt
 Wants=mdtv2-broker.service shairport-sync.service
 After=network.target redis-server.service mdtv2-broker.service shairport-sync.service
 
