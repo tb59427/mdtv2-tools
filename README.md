@@ -24,14 +24,30 @@ the bus, so it shows up as N.RADIO / N.MUSIC on a real BeoCenter / BeoSystem.
 
 ## Quick start
 
-On a fresh Pi, as root:
+On a fresh Raspberry Pi OS Lite (Bookworm or later), one line:
 
 ```sh
-git clone <this repo> mdt-tools
-cd mdt-tools
+curl -sSL https://gitlab.com/masterdatatool/software/mdtv2-tools/-/raw/master/bootstrap.sh | sudo bash
+```
+
+That installs git, clones the repo into `/opt/mdt-tools-src/`, then runs
+`install.sh` which handles everything else (apt deps, boot config patch
+for HiFiBerry + UART, systemd units, hidden pymcuprog venv). The
+installer may say `REBOOT REQUIRED` if it had to change `/boot/firmware/config.txt`
+— if so, `sudo reboot`.
+
+If you'd rather see the script before piping it to bash:
+
+```sh
+curl -sSL https://gitlab.com/masterdatatool/software/mdtv2-tools/-/raw/master/bootstrap.sh
+```
+
+Or the manual two-step:
+
+```sh
+git clone https://gitlab.com/masterdatatool/software/mdtv2-tools.git
+cd mdtv2-tools
 sudo ./install.sh
-# install.sh may say "REBOOT REQUIRED" -- if so:
-sudo reboot
 ```
 
 After the install (and reboot, if needed):
