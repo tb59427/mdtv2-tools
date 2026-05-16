@@ -104,9 +104,12 @@ APT_PKGS=(
     python3-redis
     python3-serial
     shairport-sync
-    pinctrl
     python3-venv          # for the hidden pymcuprog venv
 )
+# Note: `pinctrl` (used by mcu-firmware/flash.sh to toggle UART.SEL) is
+# a binary that ships pre-installed on Raspberry Pi OS; it isn't an
+# apt-installable package, so we don't try to install it here. The
+# flasher will warn if it isn't on PATH.
 MISSING=()
 for p in "${APT_PKGS[@]}"; do
     if ! dpkg -s "$p" >/dev/null 2>&1; then
@@ -120,6 +123,12 @@ if (( ${#MISSING[@]} > 0 )); then
     ok "apt packages installed"
 else
     skip "all apt packages already installed"
+fi
+
+if ! command -v pinctrl >/dev/null 2>&1; then
+    warn "pinctrl not on PATH -- mcu-firmware/flash.sh won't be able to toggle"
+    warn "UART.SEL until pinctrl is available. On stock RPi OS it ships by"
+    warn "default; on other distros install rpi-gpio-tools or equivalent."
 fi
 
 # ---------- 2. service user --------------------------------------------------
