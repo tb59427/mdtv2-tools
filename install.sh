@@ -165,6 +165,25 @@ else
     skip "$CFG_TXT already has mdt-tools block"
 fi
 
+# Kill the HDMI audio card (vc4-hdmi). `dtparam=audio=off` only disables
+# the legacy BCM2835 3.5mm jack; HDMI audio is exposed by the KMS/GPU
+# driver via the vc4-kms-v3d overlay, which is enabled by Pi OS by
+# default. The fix is to add `noaudio` as a parameter to that existing
+# overlay line -- we can't add a second dtoverlay= line, we have to
+# edit the existing one in place.
+if grep -qE '^dtoverlay=vc4-kms-v3d(-pi5)?([,[:space:]]|$)' "$CFG_TXT" \
+        && ! grep -qE '^dtoverlay=vc4-kms-v3d(-pi5)?[^#]*\bnoaudio\b' "$CFG_TXT"; then
+    note "patching vc4-kms-v3d overlay with ,noaudio (kills vc4-hdmi card)"
+    cp -p "$CFG_TXT" "$CFG_TXT.bak-$(date +%s)"
+    # Insert ",noaudio" immediately after vc4-kms-v3d (or -pi5 variant),
+    # preserving any other parameters already on the line.
+    sed -i -E 's/^(dtoverlay=vc4-kms-v3d(-pi5)?)([,[:space:]]|$)/\1,noaudio\3/' "$CFG_TXT"
+    NEED_REBOOT=1
+    ok "vc4-kms-v3d patched to ,noaudio"
+else
+    skip "vc4-kms-v3d already has ,noaudio (or no such overlay line)"
+fi
+
 # Strip serial console from cmdline so it doesn't fight the broker.
 note "boot cmdline: $CMDLINE"
 if grep -qE 'console=(serial0|ttyAMA0|ttyS0),[0-9]+' "$CMDLINE"; then
