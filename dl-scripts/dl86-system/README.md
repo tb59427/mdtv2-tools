@@ -1,7 +1,7 @@
 # dl86-system
 
 Manual test script for capturing audio from a DL'86 music system's CD
-source through the HiFiBerry DAC+ADC HAT.
+source through the on-HAT PCM5122/PCM1862 DAC+ADC.
 
 | Script | Pipeline |
 |---|---|
@@ -24,7 +24,9 @@ You also need:
 
 * `mdtv2-broker.service` running, with the ATtiny826 HAT physically
   wired to the music system's DL'86 line.
-* HiFiBerry DAC+ADC HAT enabled (handled by `mdt-tools/install.sh`).
+* DAC+ADC overlay loaded (handled by `mdt-tools/install.sh`; the
+  HAT is electrically compatible with the `hifiberry-dacplusadc`
+  kernel driver).
 * DL'86 commands verified for your specific music system — see
   `dl-docs/dl86-music-system/music-system.md`. The script's CD-on /
   standby bytes match what we tested; if your system uses a different

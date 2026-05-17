@@ -8,8 +8,9 @@
 > listen to records with this hardware.
 >
 > **For normal listening, use the turntable's built-in RIAA preamp** —
-> connect its line-level output to any line input (HiFiBerry's DAC, an
-> external amp, whatever). A proper analogue phono stage out-performs a
+> connect its line-level output to any line input (the HAT's DAC line
+> input, an external amp, whatever). A proper analogue phono stage
+> out-performs a
 > 3.3 V σ-Δ ADC fed by a 4 mV cartridge every time, and you skip the
 > +32 dB PGA workaround this script needs to keep the signal above the
 > chip's idle-noise floor.
@@ -32,7 +33,7 @@ Just run them.
 ## One-time prerequisites
 
 The `mdt-tools` install (run `mdt-tools/install.sh` first) handles the
-broker, the HiFiBerry overlay, the boot config, etc. These extra apt
+broker, the DAC+ADC overlay, the boot config, etc. These extra apt
 packages are needed *only* for the audio-tools scripts and the install
 script does **not** pull them automatically:
 
@@ -47,8 +48,9 @@ You also need:
 * `mdtv2-broker.service` running, with the ATtiny826 HAT physically
   wired to the Beogram's DL'80 line (so `redis-cli PUBLISH
   link:dl80:transmit a9` actually reaches the turntable).
-* HiFiBerry DAC+ADC HAT enabled (`dtoverlay=hifiberry-dacplusadc`,
-  `dtparam=audio=off` — both come from `mdt-tools/install.sh`).
+* DAC+ADC overlay loaded (`dtoverlay=hifiberry-dacplusadc`,
+  `dtparam=audio=off` — both come from `mdt-tools/install.sh`; the
+  HAT we ship is electrically compatible with that kernel driver).
 * Beogram wired into VIN4 of the HAT (L+/R+ to VINL4/VINR4; L−/R−/shield
   to AGND at the turntable end).
 

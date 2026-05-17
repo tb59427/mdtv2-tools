@@ -13,7 +13,9 @@ images) on first install. Contents:
 enable_uart=1                   # PL011 on PA1/PA2 -> /dev/serial0
 dtoverlay=disable-bt            # bluetooth doesn't get to take ttyAMA0
 dtparam=audio=off               # turns off the on-SoC HDMI/3.5mm sound
-dtoverlay=hifiberry-dacplusadc  # HiFiBerry DAC+ADC HAT (PCM5122 + PCM1862)
+dtoverlay=hifiberry-dacplusadc  # DAC+ADC driver (PCM5122 + PCM1862; our HAT is
+                                #   electrically compatible with the HiFiBerry
+                                #   DAC+ADC so we reuse that kernel overlay)
 ```
 
 The installer wraps the snippet between `# --- mdt-tools begin ---` and

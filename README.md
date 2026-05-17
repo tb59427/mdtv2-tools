@@ -13,14 +13,16 @@ the bus, so it shows up as N.RADIO / N.MUSIC on a real BeoCenter / BeoSystem.
 | `ml-source-bridge/` | `ml_source_bridge.py` -- subscribes to ML telegrams via Redis, plays a chosen role (SC / AM), routes audio in from a provider (currently AirPlay via shairport-sync). |
 | `ml-debug/` | `ml_debug.py` -- pretty-prints every ML telegram on the bus. User-launched, no service. |
 | `mcu-firmware/` | Pre-built ATtiny826 firmware `.hex` + `flash.sh` UPDI flasher. Source lives in a separate repo. |
-| `system-config/` | RPi `config.txt` snippet that disables HDMI audio, enables HiFiBerry DAC+ADC, frees `/dev/serial0`. Applied by `install.sh`. |
+| `system-config/` | RPi `config.txt` snippet that disables HDMI audio, enables the DAC+ADC driver, frees `/dev/serial0`. Applied by `install.sh`. |
 | `install.sh` | One-command Pi setup. |
 
 ## Hardware
 
 * Raspberry Pi 4 / 5 (Pi Zero 2W also fine) running Raspberry Pi OS Bookworm.
 * ATtiny826 HAT with ML transceiver (this project's custom board).
-* HiFiBerry DAC+ADC HAT for audio in/out.
+* DAC+ADC HAT (PCM5122 DAC + PCM1862 ADC over I2S; driven by the
+  Linux `hifiberry-dacplusadc` overlay, which our HAT is electrically
+  compatible with — we use the driver, the HAT itself is mdt's own).
 
 ## Quick start
 
@@ -32,7 +34,7 @@ curl -sSL https://gitlab.com/masterdatatool/software/mdtv2-tools/-/raw/master/bo
 
 That installs git, clones the repo into `/opt/mdt-tools-src/`, then runs
 `install.sh` which handles everything else (apt deps, boot config patch
-for HiFiBerry + UART, systemd units, hidden pymcuprog venv). The
+for the DAC+ADC overlay + UART, systemd units, hidden pymcuprog venv). The
 installer may say `REBOOT REQUIRED` if it had to change `/boot/firmware/config.txt`
 — if so, `sudo reboot`.
 

@@ -8,9 +8,13 @@
 enable_uart=1
 dtoverlay=disable-bt
 
-# Disable the on-board HDMI/3.5mm audio so HiFiBerry is the only soundcard.
+# Disable the on-board HDMI/3.5mm audio so the DAC+ADC HAT is the only
+# soundcard. (HDMI audio also needs ",noaudio" on the vc4-kms-v3d
+# overlay -- install.sh patches that elsewhere in this file.)
 dtparam=audio=off
 
-# Enable HiFiBerry DAC+ADC HAT (PCM5122 DAC + PCM1862 ADC over I2S+I2C).
+# Load the DAC+ADC driver for the on-HAT PCM5122 DAC + PCM1862 ADC
+# (the HAT is electrically compatible with the HiFiBerry DAC+ADC, so
+# we reuse its kernel overlay; the HAT itself is mdt's own design).
 dtoverlay=hifiberry-dacplusadc
 # --- mdt-tools end ---

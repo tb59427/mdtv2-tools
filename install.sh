@@ -15,7 +15,8 @@
 #        - enable_uart=1
 #        - dtoverlay=disable-bt
 #        - dtparam=audio=off                (disables HDMI/3.5mm audio)
-#        - dtoverlay=hifiberry-dacplusadc   (enables HiFiBerry HAT)
+#        - dtoverlay=hifiberry-dacplusadc   (loads the DAC+ADC driver
+#                                            our HAT is compatible with)
 #   3. Patches /boot/firmware/cmdline.txt to drop the serial console.
 #   4. Disables conflicting services (serial-getty, hciuart).
 #   5. Copies code to /opt/mdt-tools/{broker,ml-source-bridge,ml-debug,mcu-firmware}.
