@@ -66,3 +66,49 @@ display_name = "N.RADIO"        # optional; up to 11 chars ASCII
 # source_byte  = 0x7A           # N.MUSIC
 # provider     = "mpd"
 # display_name = "N.MUSIC"
+
+
+# ---- LIGHT-key home-automation hook ----------------------------------------
+# Pressing the LIGHT key on a Beo4 remote opens a "light channel": the
+# VM/AM then forwards every following keypress to the MLGW address
+# (B&O's home-automation gateway) until ~20 s of inactivity, at which
+# point the master emits a "Light Timeout" key (0x58) closing the
+# channel. We snoop those telegrams and run a configured shell command
+# per key.
+#
+# This is NOT just digits -- ANY Beo4 key works as a binding (Step Up,
+# Play, Stop, the colour keys, ...). LIGHT + 1 might be "evening
+# scene", LIGHT + Step Up might be "brighten", LIGHT + Stop might be
+# "all off". You get to decide.
+#
+# Disabled by default. Enable + populate `commands` below to use.
+# Keys accept any of:
+#   - a friendly Beo4 name: "step_up", "play", "red", "digit_1", "1", ...
+#   - a hex literal:        "0x1e"
+#   - a decimal int:        30
+# Common friendly names (full table in core/light_handler.py):
+#
+#   digits      0..9   (also as "digit_0".."digit_9")
+#   transport   play, stop, rewind, wind, return, record, step_up, step_down
+#   sound       mute, p_mute, volume_up, volume_down
+#   colours     red, green, yellow, blue
+#   cursor      cursor_up, cursor_down, cursor_left, cursor_right
+#   menu        select, back, exit, menu, info, guide
+#   misc        standby, clear, store, reset, goto, format
+#
+# Commands run as the bridge service user (usually `mdt`), via
+# `shell=true` so pipes / env vars / redirects work. A 30 s wall-clock
+# timeout is enforced per command. Failures are logged but never
+# crash the bridge. Unknown key names are warned about at startup.
+
+# [light_handler]
+# enabled   = true
+# timeout_s = 20
+
+# [light_handler.commands]
+# "digit_1"   = "curl -sX POST http://homeassistant.local:8123/api/services/scene/turn_on -H 'Authorization: Bearer XXXX' -d '{\"entity_id\":\"scene.evening\"}'"
+# "digit_2"   = "/usr/local/bin/lights-off.sh"
+# "step_up"   = "echo 'brighten' >> /tmp/light.log"
+# "step_down" = "echo 'dim'      >> /tmp/light.log"
+# "play"      = "echo 'toggle'   >> /tmp/light.log"
+# "red"       = "echo 'red scene' >> /tmp/light.log"

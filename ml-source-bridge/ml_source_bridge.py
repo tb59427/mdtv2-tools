@@ -53,6 +53,7 @@ from core.bus import Bus, Periodic, detect_firmware_role, log
 from core.dispatcher import Context, Dispatcher
 from core import builders as B
 from core import logging_setup
+from core.light_handler import LightHandler
 from core.telegram import (
     SRC_CD, SRC_N_MUSIC, SRC_N_RADIO, SRC_RADIO, TT_REQUEST,
 )
@@ -393,6 +394,31 @@ def main() -> int:
     role.install_handlers(dispatcher)
     ctx = Context(bus=bus, role=role, providers=providers, topology=topology)
 
+    # ---- optional LIGHT-key home-automation handler -----------------------
+    light_handler: Optional[LightHandler] = None
+    light_cfg = cfg.get("light_handler") or {}
+    if light_cfg.get("enabled", False):
+        cmd_map = light_cfg.get("commands") or {}
+        if not cmd_map:
+            log("[main] [light_handler] enabled=true but no commands "
+                "configured -- nothing will trigger", err=True)
+        else:
+            light_handler = LightHandler(
+                commands=cmd_map,
+                timeout_s=float(light_cfg.get("timeout_s", 20.0)),
+            )
+            # Report what actually got parsed (after name resolution +
+            # dedup) so the user can spot typos like "stepup" vs
+            # "step_up" or missing aliases.
+            if light_handler.commands:
+                bindings = ", ".join(
+                    f"0x{code:02x}" for code in sorted(light_handler.commands)
+                )
+                log(f"[main] light_handler armed; bound keys: {bindings}")
+            else:
+                log("[main] light_handler enabled but no usable bindings "
+                    "-- nothing will fire (see earlier warnings)", err=True)
+
     # ---- background threads -----------------------------------------------
     threads: list[threading.Thread] = []
 
@@ -447,6 +473,15 @@ def main() -> int:
                 role.passive_observe(t, ctx)
             except Exception as e:
                 log(f"[main] role.passive_observe raised: {e}", err=True)
+            # LIGHT-key handler also runs for every telegram (telegrams
+            # are addressed to MLGW=0xF0, not to us). No-op when no
+            # [light_handler] section was configured.
+            if light_handler is not None:
+                try:
+                    light_handler.observe(t)
+                except Exception as e:
+                    log(f"[main] light_handler.observe raised: {e}",
+                        err=True)
             if not role.matches_us(t):
                 continue
             handled = dispatcher.dispatch(t, ctx)

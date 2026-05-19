@@ -53,6 +53,9 @@ ADDR_SC_AUX    = 0x02   # SC's auxiliary address (alias of ADDR_DISCOVERY).
                         # Captured: BeoSound 5 (SC) used 0x02 at power-on.
 ADDR_VM_AUX    = 0x6E   # VM's auxiliary address (BeoSystem 3 captured).
 ADDR_AM_AUX    = 0x27   # AM's auxiliary address (BeoCenter 2 captured).
+ADDR_MLGW      = 0xF0   # MasterLink Gateway -- B&O's home-automation bridge.
+                        # VM/AM forward the LIGHT key (and following digits)
+                        # to this address; we observe to drive scenes.
 
 
 # ---- telegram type bytes (offset 3) ----------------------------------------
@@ -97,12 +100,26 @@ SRC_N_RADIO  = 0xA1
 
 
 # ---- Beo4 key codes we actually act on -------------------------------------
-KEY_STEP_UP    = 0x1E   # NEXT
-KEY_STEP_DOWN  = 0x1F   # PREV
-KEY_REWIND     = 0x32
-KEY_WIND       = 0x34
-KEY_GO_PLAY    = 0x35
-KEY_STOP       = 0x36
+KEY_STEP_UP       = 0x1E   # NEXT
+KEY_STEP_DOWN     = 0x1F   # PREV
+KEY_REWIND        = 0x32
+KEY_WIND          = 0x34
+KEY_GO_PLAY       = 0x35
+KEY_STOP          = 0x36
+KEY_LIGHT         = 0x9B   # LIGHT (home-automation menu trigger)
+KEY_LIGHT_TIMEOUT = 0x58   # Synthetic key VM/AM emits when no follow-up
+                           # is pressed within ~20 s of LIGHT.
+# Digit keys 0..9 used as scene selectors after LIGHT.
+KEY_DIGIT_0 = 0x00
+KEY_DIGIT_1 = 0x01
+KEY_DIGIT_2 = 0x02
+KEY_DIGIT_3 = 0x03
+KEY_DIGIT_4 = 0x04
+KEY_DIGIT_5 = 0x05
+KEY_DIGIT_6 = 0x06
+KEY_DIGIT_7 = 0x07
+KEY_DIGIT_8 = 0x08
+KEY_DIGIT_9 = 0x09
 
 # Source-selection Beo4 key codes (from beo4_commanddict in ml-debug/const.py).
 # Used for the auto-wake feature: when the provider's audio stream starts we
