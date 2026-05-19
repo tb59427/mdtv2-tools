@@ -35,7 +35,8 @@ from core.telegram import (
     ADDR_ALL, ADDR_AM, BEO4_KEY_FOR_SOURCE,
     KEY_REWIND, KEY_STEP_DOWN, KEY_STEP_UP, KEY_WIND,
     PT_BEO4_KEY, PT_GOTO_SOURCE, PT_LOCK_MANAGER, PT_MASTER_PRESENT,
-    PT_RELEASE, PT_REQ_DISTRIBUTED_SOURCE, PT_REQ_LOCAL_SOURCE, Telegram,
+    PT_RELEASE, PT_REQ_DISTRIBUTED_SOURCE, PT_REQ_LOCAL_SOURCE,
+    PT_STANDBY, Telegram,
 )
 from roles.base import Role
 
@@ -52,6 +53,7 @@ class AudioMasterRole(Role):
         d.register((PT_LOCK_MANAGER,),           self._on_lock_manager)
         d.register((PT_GOTO_SOURCE,),            self._on_goto_source)
         d.register((PT_RELEASE,),                self._on_release)
+        d.register((PT_STANDBY,),                self._on_standby)
         # Per-key handlers for BEO4 next/prev/wind/rewind.
         d.register((PT_BEO4_KEY, "key", KEY_STEP_UP),   self._on_next)
         d.register((PT_BEO4_KEY, "key", KEY_STEP_DOWN), self._on_prev)
@@ -109,6 +111,23 @@ class AudioMasterRole(Role):
             provider.pause()
         elif t.src_dest == 0:
             log(f"[am] generic RELEASE from 0x{t.from_addr:02x}"
+                f" -- pausing all providers")
+            for p in ctx.providers.values():
+                p.pause()
+
+    def _on_standby(self, t: Telegram, ctx: Context) -> None:
+        # Same shape as RELEASE: src_dest is the source byte going to
+        # standby. VM/AM emit this when the user switches away from a
+        # currently-distributed source -- e.g. moving from N.MUSIC
+        # (us) to a video source. Without this, our provider would
+        # keep streaming silently in the background.
+        provider = ctx.provider_for(t.src_dest)
+        if provider is not None:
+            log(f"[am] STANDBY 0x{t.src_dest:02x} from 0x{t.from_addr:02x}"
+                f" -- pausing {provider.display_name!r}")
+            provider.pause()
+        elif t.src_dest == 0:
+            log(f"[am] generic STANDBY from 0x{t.from_addr:02x}"
                 f" -- pausing all providers")
             for p in ctx.providers.values():
                 p.pause()

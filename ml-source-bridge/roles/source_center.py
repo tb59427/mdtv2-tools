@@ -13,6 +13,10 @@ Telegrams handled (TO ∈ {0xC2, 0x83, 0x80}):
        w/ src_dest matching our         provider.play()
        provider's source byte
   CMD  0x0D BEO4_KEY (1E/1F)         -> next/prev on provider
+  CMD  0x10 STANDBY                  -> provider.pause()
+       (AM/VM emits this when the user switches away from our source,
+        with src_dest = our source byte; without handling it AirPlay
+        would keep streaming until full system shutdown.)
   CMD  0x11 RELEASE                  -> provider.pause()
 
 We no longer try to "wake the AM" by injecting a virtual Beo4 key when
@@ -32,7 +36,7 @@ from core.telegram import (
     BEO4_KEY_FOR_SOURCE,
     KEY_STEP_DOWN, KEY_STEP_UP,
     PT_BEO4_KEY, PT_DISTRIBUTION_REQUEST, PT_LOCK_MANAGER,
-    PT_MASTER_PRESENT, PT_RELEASE,
+    PT_MASTER_PRESENT, PT_RELEASE, PT_STANDBY,
     SRC_PC, TT_REQUEST, Telegram,
 )
 from roles.base import Role
@@ -115,6 +119,7 @@ class SourceCenterRole(Role):
     def install_handlers(self, d: Dispatcher) -> None:
         d.register((PT_DISTRIBUTION_REQUEST,),         self._on_dist_request)
         d.register((PT_RELEASE,),                      self._on_release)
+        d.register((PT_STANDBY,),                      self._on_standby)
         d.register((PT_MASTER_PRESENT,),               self._on_master_present)
         d.register((PT_BEO4_KEY, "key", KEY_STEP_UP),  self._on_next)
         d.register((PT_BEO4_KEY, "key", KEY_STEP_DOWN), self._on_prev)
@@ -265,6 +270,28 @@ class SourceCenterRole(Role):
             provider.pause()
         elif t.src_dest == 0:
             log(f"[sc] generic RELEASE from 0x{t.from_addr:02x}"
+                f" -- pausing all providers")
+            for p in ctx.providers.values():
+                p.pause()
+
+    def _on_standby(self, t: Telegram, ctx: Context) -> None:
+        # Same payload-shape as RELEASE: src_dest is the source byte
+        # going to standby. Observed flow when the user changes source
+        # from N.MUSIC (us) to a video source on the remote:
+        #   VM -> AM   PT=STANDBY  payload=03 03 01 00 01
+        #   VM -> SC   PT=DIST_REQUEST  src=0x47 PC  (claim new source)
+        #   AM -> SC   PT=STANDBY  src_dest=0x7A (N.MUSIC)  pl_len=0
+        # The last one is what reaches us. Without handling it our
+        # provider would keep streaming silently (and waste cycles).
+        # If src_dest=0, treat it like a generic standby and pause
+        # everything.
+        provider = ctx.provider_for(t.src_dest)
+        if provider is not None:
+            log(f"[sc] STANDBY 0x{t.src_dest:02x} from 0x{t.from_addr:02x}"
+                f" -- pausing {provider.display_name!r}")
+            provider.pause()
+        elif t.src_dest == 0:
+            log(f"[sc] generic STANDBY from 0x{t.from_addr:02x}"
                 f" -- pausing all providers")
             for p in ctx.providers.values():
                 p.pause()
