@@ -1,17 +1,10 @@
-# mdt-tools
+# mdtv2-tools
 
-Raspberry-Pi-based interface to a Bang & Olufsen MasterLink (ML) and
-Datalink ('80 / '86) audio system. Lets a small Pi + a custom HAT
-present itself to an old B&O music system as a Source Center (SC) or
-Audio Master (AM), control legacy Datalink components (Beogram
-turntables, BeoMaster CD players), record their audio, and hook the
-LIGHT key on Beo4 remotes into modern home automation.
+Python tool-set for the MasterDataTool v2. A Raspberry Pi acessory board that interfaces vintage B&O devices like BeoSound 9000, BeoCenter 2, BeoLab 3500, BeoGram 7000, BeoCenter 9500, etc. and makes them compatible with the modern streaming world.
 
-The hardware side is the MDT HAT — an on-board MCU plus an ML
-transceiver, our own design. The audio side reuses the kernel's
-`hifiberry-dacplusadc` overlay, which our HAT happens to be pin-
-compatible with. Tested daily on a BeoCenter 2 + BeoSystem 3 stack
-and a Beogram 5500 turntable.
+Receive and send any remote control messages or analog audio streams via MasterLink or DataLink to your classic audio system. Converts your Raspberry into a ML or DL device 
+
+[https://labs.polyvection.com/mdt](https://labs.polyvection.com/mdt)
 
 ## Features at a glance
 
@@ -56,31 +49,6 @@ talks to Redis channels (`link:ml:*`, `link:dl80:*`, `link:dl86:*`,
 `link:gpio:*`), so you can drop in extra subscribers without touching
 the broker.
 
-## Repository layout
-
-| Path | Description |
-|---|---|
-| `broker/` | `mdtv2-broker.py` — MCU ↔ Redis bridge over `/dev/serial0`. Frames `CHAN_ML` / `CHAN_DL86` / `CHAN_DL80` / `CHAN_GPIO` / `CHAN_PING` bytes between the MCU's wire protocol and Redis pub/sub channels. |
-| `ml-source-bridge/` | `ml_source_bridge.py` — main daemon. Plays SC or AM, runs source providers (AirPlay), and hosts the `[light_handler]` home-automation hook. Config: `/etc/ml-source-bridge.toml`. |
-| `ml-debug/` | `ml_debug.py` — MasterLink protocol pretty-printer. User-launched. |
-| `dl-debug/` | `dl_debug.py` — DL'80 + DL'86 protocol pretty-printer with status-payload decoding (track, volume, transport state, standby). |
-| `dl-docs/` | Verified DL'80 (Beogram) and DL'86 (music-system) command tables. |
-| `dl-scripts/dl80-turntable/` | Manual phono-capture scripts: triggers turntable transport over DL'80, records 60 s, encodes FLAC (with or without software RIAA). |
-| `dl-scripts/dl86-system/` | Manual CD-capture script: triggers CD source over DL'86, records 60 s, encodes FLAC, sends standby. |
-| `mcu-firmware/` | Pre-built MDT MCU firmware `.hex` + `flash.sh` UPDI flasher. Source lives in a separate repo. |
-| `system-config/` | Pi `config.txt` snippet that disables HDMI audio, loads the DAC+ADC driver, frees `/dev/serial0`. Applied by `install.sh`. |
-| `install.sh` / `bootstrap.sh` | Pi installer (one-line via curl, or manual two-step). |
-
-## Hardware
-
-* Raspberry Pi 4 / 5 (Pi Zero 2W also fine) running Raspberry Pi OS Bookworm Lite.
-* MDT HAT — our custom board with the on-board MCU and ML transceiver.
-* DAC+ADC HAT (PCM5122 DAC + PCM1862 ADC over I²S; driven by the Linux
-  `hifiberry-dacplusadc` overlay, which our HAT is electrically
-  compatible with — we use the driver, the HAT itself is mdt's own).
-* Audio-side wiring: turntable to VIN4 single-ended (phono); music-
-  system tape-record-out to VIN3 single-ended (line-level CD capture).
-
 ## Quick start
 
 On a fresh Raspberry Pi OS Lite (Bookworm or later), one line:
@@ -121,7 +89,7 @@ sudo systemctl enable --now mdtv2-broker.service ml-source-bridge.service
 # 3. follow logs
 sudo journalctl -u mdtv2-broker.service -u ml-source-bridge.service -f
 
-# 4. flash the MCU (optional; install.sh leaves the .hex in place)
+# 4. flash the MCU (optional, comes pre-flashed; install.sh leaves the .hex in place)
 sudo /opt/mdt-tools/mcu-firmware/flash.sh \
      /opt/mdt-tools/mcu-firmware/firmware-v1.5.5.hex
 
