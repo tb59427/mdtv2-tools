@@ -94,8 +94,8 @@ sudo /opt/mdt-tools/mcu-firmware/flash.sh \
      /opt/mdt-tools/mcu-firmware/firmware-v1.5.5.hex
 
 # 5. inspect bus traffic
-sudo python3 /opt/mdt-tools/ml-debug/ml_debug.py        # MasterLink
-python3 /opt/mdt-tools/dl-debug/dl_debug.py             # Datalink
+python3 /opt/mdt-tools/ml-debug/ml_debug.py        # MasterLink
+python3 /opt/mdt-tools/dl-debug/dl_debug.py        # Datalink
 ```
 
 ## Configuration cheatsheet
