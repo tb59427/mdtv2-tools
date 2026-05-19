@@ -81,7 +81,7 @@ After the install (and reboot if needed):
 
 ```sh
 # 1. configure the bridge (sources, role, light_handler, ...)
-sudo $EDITOR /etc/ml-source-bridge.toml
+sudo nano /etc/ml-source-bridge.toml
 
 # 2. enable the services (install.sh already does this on first run)
 sudo systemctl enable --now mdtv2-broker.service ml-source-bridge.service
