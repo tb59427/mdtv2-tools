@@ -10,17 +10,17 @@ Receive and send any remote control messages or analog audio streams via MasterL
 
 | Feature | What it does | Lives in |
 |---|---|---|
-| **AirPlay → MasterLink source** | Pi appears on the ML bus as an SC, claims a configurable source byte (e.g. N.RADIO), pipes shairport-sync audio onto the bus with track / artist metadata. | `ml-source-bridge/` (`role = "sc"`) |
-| **Linkspeaker emulation** | Pi pretends to be an Audio Master so ML link-speakers in setups without a real BeoMaster can play sources we provide. | `ml-source-bridge/` (`role = "am"`) |
-| **LIGHT-key home automation** | Beo4 remote `LIGHT + <any key>` runs a user-configured shell command (Home Assistant call, MQTT publish, GPIO toggle, whatever). Friendly names like `step_up`, `digit_1`, `red`, `play`. | `ml-source-bridge/` (`[light_handler]`) |
-| **DL'80 turntable control** | Send single-byte DL'80 commands (`BG.Play`, `BG.ADV`, `Sys.Standby`, …) from `redis-cli`. Verified on a Beogram 5500. | `dl-docs/dl80-beogram/`, `dl-scripts/dl80-turntable/` |
-| **DL'86 music-system control** | Send variable-bit-length DL'86 commands (CD on, source select, next, prev, standby) for B&O integrated music systems. | `dl-docs/dl86-music-system/`, `dl-scripts/dl86-system/` |
-| **Phono capture (turntable)** | One-command 60 s record from a turntable into FLAC: triggers `BG.Play`, configures the on-HAT ADC for VIN4 + PGA, records, optionally applies a software RIAA HP-30 de-emphasis. | `dl-scripts/dl80-turntable/` |
-| **CD capture (music system)** | One-command 60 s record from a CD source: triggers DL'86 CD on, configures ADC for VIN3 at 0 dB, records, encodes FLAC, sends standby. | `dl-scripts/dl86-system/` |
+| **Source Center emulation** | Pi appears on the ML bus as an SC, claims a configurable source byte (e.g. N.RADIO), pipes shairport-sync audio onto the bus with track / artist metadata. Lets use use the NET sources of ML audio masters| `ml-source-bridge/` (`role = "sc"`) |
+| **Audio Master emulation** | Pi pretends to be an Audio Master so ML link-speakers in setups without a real BeoMaster can play sources we provide. | `ml-source-bridge/` (`role = "am"`) |
+| **LIGHT-key home automation** | Beo4 remote `LIGHT + <any key>` runs a user-configured shell command (Home Assistant call, MQTT publish, GPIO toggle, whatever). Not all ML devices can forward them - check if yours supports it beforehand | `ml-source-bridge/` (`[light_handler]`) |
+| **DL'80 turntable control** | Remote control your DL enabled BeoGram turntable | `dl-docs/dl80-beogram/`, `dl-scripts/dl80-turntable/` |
+| **DL'86 music-system control** | Remote control your DL enabled BeoCenter or BeoMaster turntable | `dl-docs/dl86-music-system/`, `dl-scripts/dl86-system/` |
+| **Phono capture (turntable)** | Sample script to do a 60 s record from a turntable into FLAC: triggers `BG.Play`, configures the ADC, records and optionally applies a software RIAA de-emphasis. | `dl-scripts/dl80-turntable/` |
+| **CD capture (music system)** | Sample script to do a 60 s record from a CD source: triggers DL'86 CD on, configures ADC, records, encodes FLAC and sends standby. | `dl-scripts/dl86-system/` |
 | **MasterLink protocol debugger** | Pretty-prints every ML telegram on the bus, decoded (TO/FROM/PT/payload). Compact and verbose modes. | `ml-debug/` |
 | **Datalink protocol debugger** | Pretty-prints every DL'80 and DL'86 message, decoded (opcode names for DL'80; address/format/payload breakdown for DL'86 including status frames with volume/track/standby semantics). | `dl-debug/` |
 | **One-line install** | `curl … bootstrap.sh \| sudo bash` on a fresh Pi OS Lite installs apt deps, patches `config.txt`, sets up systemd services, deploys all code, builds a hidden pymcuprog venv for flashing. | `bootstrap.sh`, `install.sh` |
-| **UPDI flashing** | `sudo flash.sh firmware-vX.Y.Z.hex` toggles UART.SEL, stops the broker, flashes the MCU via pymcuprog, restarts the broker. No manual venv juggling. | `mcu-firmware/flash.sh` |
+| **MCU updater** | `sudo flash.sh firmware-vX.Y.Z.hex` lets you update the microcontroller handling raw ML and DL communication | `mcu-firmware/flash.sh` |
 
 ## Architecture
 
