@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 ml-broker v2  --  drop-in replacement for ml-broker.py targeting the mdt v2
-hardware (ATtiny826 on the HAT takes over the 9-bit MasterLink framing).
+hardware (the on-HAT MCU takes over the 9-bit MasterLink framing).
 
 The redis interface is identical to v1:
   - subscribe    link:ml:transmit   (publisher sends hex-encoded telegram body
@@ -10,7 +10,7 @@ The redis interface is identical to v1:
   - publish      link:ml:receive    (full telegram incl. checksum + 0x00, same
                                      as v1)
 
-Wire protocol to the ATtiny: see mcu-firmware/docs/WIRE_PROTOCOL.md
+Wire protocol to the MCU: see mcu-firmware/docs/WIRE_PROTOCOL.md
   [0x55][0xAA][CHAN][LEN][PAYLOAD...][CRC16 little-endian]
   CRC-16/CCITT-FALSE (poly 0x1021, init 0xFFFF) over CHAN+LEN+PAYLOAD
 """
@@ -181,7 +181,7 @@ class Broker:
     _ML_MODE_NAMES = {0x00: "slave", 0x01: "master"}
 
     def _handle_pong(self, payload: bytes) -> None:
-        """Parse the ATtiny's PONG reply.
+        """Parse the MCU's PONG reply.
 
         Layout: "PONG" + major + minor + patch + caps + (since v1.4.0:
         ml_mode byte) + ASCII build_id."""
@@ -215,7 +215,7 @@ class Broker:
         if chan == CHAN_ML:
             hex_s = payload.hex()
             if self.last_sent_hex and hex_s.startswith(self.last_sent_hex):
-                # ATtiny already drops own-TX echoes, but belt & braces.
+                # MCU already drops own-TX echoes, but belt & braces.
                 return
             log(f"ML RX: {hex_s}")
             self.r.publish(REDIS_ML_RX, hex_s)
@@ -337,7 +337,7 @@ class Broker:
         log(f"DL80 TX: {body.hex()}")
 
     def _handle_gpio_state(self, payload: bytes) -> None:
-        """ATtiny -> host CHAN_GPIO frame. Single byte = state bitmap."""
+        """MCU -> host CHAN_GPIO frame. Single byte = state bitmap."""
         if len(payload) < 1:
             log(f"[broker] GPIO frame too short: {payload.hex()}")
             return

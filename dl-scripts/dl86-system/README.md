@@ -22,7 +22,7 @@ sudo apt install -y \
 
 You also need:
 
-* `mdtv2-broker.service` running, with the ATtiny826 HAT physically
+* `mdtv2-broker.service` running, with the MDT HAT physically
   wired to the music system's DL'86 line.
 * DAC+ADC overlay loaded (handled by `mdt-tools/install.sh`; the
   HAT is electrically compatible with the `hifiberry-dacplusadc`

@@ -140,5 +140,5 @@ Verbose (`-v`) prints the full bit breakdown:
 ## What it depends on
 
 * `redis-py` (`apt install python3-redis`)
-* The broker (`mdtv2-broker.service`) running, with the ATtiny826 HAT
+* The broker (`mdtv2-broker.service`) running, with the MDT HAT
   connected to whichever Datalink line you're snooping.

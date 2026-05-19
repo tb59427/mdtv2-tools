@@ -1,5 +1,5 @@
 [Unit]
-Description=mdt v2 broker (ATtiny826 <-> Redis bridge)
+Description=mdt v2 broker (MCU <-> Redis bridge)
 Documentation=https://labs.polyvection.com/mdt
 Wants=redis-server.service
 After=network.target redis-server.service

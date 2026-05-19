@@ -7,8 +7,8 @@ Audio Master (AM), control legacy Datalink components (Beogram
 turntables, BeoMaster CD players), record their audio, and hook the
 LIGHT key on Beo4 remotes into modern home automation.
 
-The hardware side is an ATtiny826-based HAT with an ML transceiver
-(custom board); the audio side reuses the kernel's
+The hardware side is the MDT HAT — an on-board MCU plus an ML
+transceiver, our own design. The audio side reuses the kernel's
 `hifiberry-dacplusadc` overlay, which our HAT happens to be pin-
 compatible with. Tested daily on a BeoCenter 2 + BeoSystem 3 stack
 and a Beogram 5500 turntable.
@@ -39,7 +39,7 @@ and a Beogram 5500 turntable.
             ▲                              ▲                            │
             │                              │                            │
        ╔════╧══════════════════════════════╧═════════════╗              │
-       ║      ATtiny826 HAT  (ml / dl-80 / dl-86)        ║              │
+       ║         MDT HAT  (ml / dl-80 / dl-86)           ║              │
        ║         ↕ /dev/serial0 + GPIO + I²S             ║              │
        ╚═════════════════════════╤═══════════════════════╝              │
                                  │                                      │
@@ -60,21 +60,21 @@ the broker.
 
 | Path | Description |
 |---|---|
-| `broker/` | `mdtv2-broker.py` — ATtiny826 ↔ Redis bridge over `/dev/serial0`. Frames `CHAN_ML` / `CHAN_DL86` / `CHAN_DL80` / `CHAN_GPIO` / `CHAN_PING` bytes between the MCU's wire protocol and Redis pub/sub channels. |
+| `broker/` | `mdtv2-broker.py` — MCU ↔ Redis bridge over `/dev/serial0`. Frames `CHAN_ML` / `CHAN_DL86` / `CHAN_DL80` / `CHAN_GPIO` / `CHAN_PING` bytes between the MCU's wire protocol and Redis pub/sub channels. |
 | `ml-source-bridge/` | `ml_source_bridge.py` — main daemon. Plays SC or AM, runs source providers (AirPlay), and hosts the `[light_handler]` home-automation hook. Config: `/etc/ml-source-bridge.toml`. |
 | `ml-debug/` | `ml_debug.py` — MasterLink protocol pretty-printer. User-launched. |
 | `dl-debug/` | `dl_debug.py` — DL'80 + DL'86 protocol pretty-printer with status-payload decoding (track, volume, transport state, standby). |
 | `dl-docs/` | Verified DL'80 (Beogram) and DL'86 (music-system) command tables. |
 | `dl-scripts/dl80-turntable/` | Manual phono-capture scripts: triggers turntable transport over DL'80, records 60 s, encodes FLAC (with or without software RIAA). |
 | `dl-scripts/dl86-system/` | Manual CD-capture script: triggers CD source over DL'86, records 60 s, encodes FLAC, sends standby. |
-| `mcu-firmware/` | Pre-built ATtiny826 firmware `.hex` + `flash.sh` UPDI flasher. Source lives in a separate repo. |
+| `mcu-firmware/` | Pre-built MDT MCU firmware `.hex` + `flash.sh` UPDI flasher. Source lives in a separate repo. |
 | `system-config/` | Pi `config.txt` snippet that disables HDMI audio, loads the DAC+ADC driver, frees `/dev/serial0`. Applied by `install.sh`. |
 | `install.sh` / `bootstrap.sh` | Pi installer (one-line via curl, or manual two-step). |
 
 ## Hardware
 
 * Raspberry Pi 4 / 5 (Pi Zero 2W also fine) running Raspberry Pi OS Bookworm Lite.
-* ATtiny826 HAT with ML transceiver — this project's custom board.
+* MDT HAT — our custom board with the on-board MCU and ML transceiver.
 * DAC+ADC HAT (PCM5122 DAC + PCM1862 ADC over I²S; driven by the Linux
   `hifiberry-dacplusadc` overlay, which our HAT is electrically
   compatible with — we use the driver, the HAT itself is mdt's own).

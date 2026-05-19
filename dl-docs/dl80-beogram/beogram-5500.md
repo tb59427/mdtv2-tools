@@ -1,7 +1,7 @@
 # Beogram 5500 — verified DL'80 commands
 
 Tested 2026-05-02 against a Beogram 5500 connected to the mdtv2 bridge
-via the DL'80 wire on the ATtiny826 HAT. Each command is a single byte
+via the DL'80 wire on the MDT HAT. Each command is a single byte
 TX'd on the `link:dl80:transmit` Redis channel; the broker takes care
 of the wire-level repeat that the DL'80 spec requires.
 

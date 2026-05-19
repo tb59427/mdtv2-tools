@@ -45,7 +45,7 @@ sudo apt install \
 
 You also need:
 
-* `mdtv2-broker.service` running, with the ATtiny826 HAT physically
+* `mdtv2-broker.service` running, with the MDT HAT physically
   wired to the Beogram's DL'80 line (so `redis-cli PUBLISH
   link:dl80:transmit a9` actually reaches the turntable).
 * DAC+ADC overlay loaded (`dtoverlay=hifiberry-dacplusadc`,

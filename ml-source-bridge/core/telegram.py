@@ -3,7 +3,7 @@
 The wire layout we receive from the broker (link:ml:receive) and send to the
 broker (link:ml:transmit) is identical except RX includes a checksum and 0x00
 end-marker which we ignore on parse and don't emit on TX -- the broker /
-ATtiny manage those.
+MCU manage those.
 
 Layout (offsets):
   [0]    TO            destination address

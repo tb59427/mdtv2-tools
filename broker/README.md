@@ -1,6 +1,6 @@
 # mdtv2-broker
 
-ATtiny826 ↔ Redis bridge. Translates between the MCU's framed wire
+MDT MCU ↔ Redis bridge. Translates between the MCU's framed wire
 protocol on `/dev/serial0` (115200 baud) and Redis pub/sub channels:
 
 | Redis channel | Direction | Payload |

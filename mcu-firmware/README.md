@@ -1,6 +1,6 @@
 # mcu-firmware (binary distribution)
 
-This directory ships the **pre-built ATtiny826 firmware binary** plus
+This directory ships the **pre-built MDT MCU firmware binary** plus
 `flash.sh`, the serialUPDI flasher.
 
 The firmware **source** lives in a separate git repo. After building it

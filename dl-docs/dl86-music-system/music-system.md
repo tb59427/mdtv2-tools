@@ -1,7 +1,7 @@
 # DL'86 music system — verified commands
 
 Tested 2026-05-02 against a B&O music system (model: _add yours here_)
-connected to the mdtv2 bridge via the DL'86 wire on the ATtiny826 HAT.
+connected to the mdtv2 bridge via the DL'86 wire on the MDT HAT.
 Each command is a 17-bit DL'86 frame TX'd on the `link:dl86:transmit`
 Redis channel. The broker takes care of pulse-distance encoding on the
 wire.

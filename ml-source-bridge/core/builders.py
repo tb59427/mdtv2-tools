@@ -1,7 +1,7 @@
 """Outgoing-telegram builders.
 
 Each builder returns a `bytes` object ready to be hex-encoded and pushed to
-`link:ml:transmit`. The broker / ATtiny handle the wire-level checksum and
+`link:ml:transmit`. The broker / MCU handle the wire-level checksum and
 0x00 end-marker, so we never include those.
 
 For telegrams we know work in the field (the multi-message handshakes
