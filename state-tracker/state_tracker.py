@@ -666,6 +666,7 @@ class DeviceInventory:
         self._devs: dict = {}     # addr -> {first_seen,last_seen,count,class,device_id}
         self._rev = 0             # bumps only on a STRUCTURAL change
         self._published_rev = -1  # last rev handed to _publish_devices
+        self.sweep_gate = threading.Lock()   # single-flight: one sweep at a time
 
     def observe(self, raw: bytes) -> None:
         try:
@@ -753,33 +754,43 @@ def _run_sweep(r: "redis.StrictRedis", inv: "DeviceInventory",
                stop: threading.Event, full: bool = False) -> None:
     """Fire MASTER_PRESENT probes across the address range; pongs are
     captured by the listen loop into the inventory. Then publish the
-    inventory. Probes spoof FROM a master (the device pongs to a
-    master); we never probe the AM's own address."""
-    addrs = (list(range(0x01, 0xFF)) if full
-             else list(SWEEP_LOW_RANGE) + SWEEP_KNOWN_HIGH)
-    log(f"discovery sweep: {len(addrs)} addrs x{SWEEP_PASSES} "
-        f"({'full' if full else 'default'} range)")
-    for _ in range(SWEEP_PASSES):
-        for addr in addrs:
-            if stop.is_set():
-                return
-            if addr in BROADCAST_ADDRS:
-                continue
-            # Probe FROM a master; use the AM only to probe the VM, the VM
-            # for everything else (including probing the AM itself).
-            prober = ADDR_AM if addr == ADDR_VM else ADDR_VM
-            try:
-                r.publish(REDIS_ML_TX, _build_mp_probe(addr, prober))
-            except redis.exceptions.RedisError:
-                pass
-            stop.wait(SWEEP_GAP_S)
-    stop.wait(0.5)                       # let the last pongs land
+    inventory. Probes spoof FROM a master (the device pongs to a master).
+
+    Single-flight: if a sweep is already running (e.g. the startup sweep
+    is still going when a manual trigger arrives), the new request is
+    skipped rather than run concurrently -- two overlapping sweeps would
+    double the probe traffic on the bus for no benefit."""
+    if not inv.sweep_gate.acquire(blocking=False):
+        log("discovery sweep already in progress; ignoring trigger")
+        return
     try:
-        _publish_devices(r, inv, force=True)
-    except redis.exceptions.RedisError:
-        pass
-    log(f"discovery sweep done: {inv.as_blob()['present_count']} "
-        f"device(s) present")
+        addrs = (list(range(0x01, 0xFF)) if full
+                 else list(SWEEP_LOW_RANGE) + SWEEP_KNOWN_HIGH)
+        log(f"discovery sweep: {len(addrs)} addrs x{SWEEP_PASSES} "
+            f"({'full' if full else 'default'} range)")
+        for _ in range(SWEEP_PASSES):
+            for addr in addrs:
+                if stop.is_set():
+                    return
+                if addr in BROADCAST_ADDRS:
+                    continue
+                # Probe FROM a master; use the AM only to probe the VM, the
+                # VM for everything else (including probing the AM itself).
+                prober = ADDR_AM if addr == ADDR_VM else ADDR_VM
+                try:
+                    r.publish(REDIS_ML_TX, _build_mp_probe(addr, prober))
+                except redis.exceptions.RedisError:
+                    pass
+                stop.wait(SWEEP_GAP_S)
+        stop.wait(0.5)                   # let the last pongs land
+        try:
+            _publish_devices(r, inv, force=True)
+        except redis.exceptions.RedisError:
+            pass
+        log(f"discovery sweep done: {inv.as_blob()['present_count']} "
+            f"device(s) present")
+    finally:
+        inv.sweep_gate.release()
 
 
 # ============================================================================

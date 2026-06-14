@@ -187,6 +187,12 @@ redis-cli GET state:ml:devices              # read the result
 redis-cli SUBSCRIBE link:ml:devices         # or watch it change
 ```
 
+Sweeps are **single-flight** — only one runs at a time. A trigger that
+arrives while a sweep is in progress (e.g. a manual `discover` right after
+boot, while the startup sweep is still going) is ignored rather than run
+concurrently, so the bus never sees two overlapping probe storms. Wait for
+`discovery sweep done` in the log, then trigger again if you need a fresh one.
+
 The sweep is **non-disruptive** — MASTER_PRESENT is a presence query, not
 a source command, so it doesn't interrupt playback. Between sweeps the
 inventory keeps refreshing passively: every device that sends *any*
