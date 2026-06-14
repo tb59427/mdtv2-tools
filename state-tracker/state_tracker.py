@@ -127,10 +127,36 @@ ADDR_VM             = 0xC0
 DEFAULT_QUERY_ADDR  = 0x06
 QUERY_MASTERS       = (ADDR_AM, ADDR_VM)
 
+# Source-byte -> which master's domain it belongs to. ML has two
+# independent masters: the Audio Master (audio path) and the Video
+# Master (video path). We route each source-carrying telegram into the
+# matching slot by the *source category*, not by the FROM address --
+# that way an audio source announced by the Source Center (0xc2, e.g.
+# our own AirPlay N.RADIO) still lands in the "am" view without giving
+# the non-master SC its own slot.
+SOURCE_KIND = {
+    # audio domain -> am
+    0x47: "am",  # PC
+    0x6f: "am",  # RADIO
+    0x79: "am",  # A.MEM
+    0x7a: "am",  # N.MUSIC
+    0x8d: "am",  # CD
+    0x97: "am",  # A.AUX
+    0xa1: "am",  # N.RADIO
+    # video domain -> vm
+    0x0b: "vm",  # TV
+    0x15: "vm",  # V.MEM
+    0x16: "vm",  # DVD2
+    0x1f: "vm",  # DTV
+    0x29: "vm",  # DVD
+    0x33: "vm",  # V.AUX
+    0x3e: "vm",  # DOORCAM
+}
+
 # Audio sources we'll "join" with a GOTO to fetch the track (see
 # _build_goto). Gating to these means we never accidentally GOTO a
 # video source or a junk byte.
-AUDIO_SOURCES = {0x6f, 0x79, 0x7a, 0x8d, 0x97, 0xa1}   # RADIO/A.MEM/N.MUSIC/CD/A.AUX/N.RADIO
+AUDIO_SOURCES = {s for s, kind in SOURCE_KIND.items() if kind == "am"}
 
 
 def _build_source_query(link_addr: int, master: int) -> str:
@@ -218,7 +244,8 @@ def parse_ml(raw: bytes) -> Optional[dict]:
             return {"from": frm,
                     "source": src if src in ML_SOURCE_NAMES else None,
                     "activity": 0x06 if pt == PT_STANDBY else 0x01,
-                    "track": None}
+                    "track": None,
+                    "standby": True}           # source-less form -> both slots
 
         if pt == PT_REQ_DIST_SOURCE and raw[3] == TT_RESPONSE:
             # Reply to a distributed-source query (ours, or a real link
@@ -247,14 +274,17 @@ def parse_ml(raw: bytes) -> Optional[dict]:
             # key sits just past the 5-byte payload, at raw[14].
             if len(raw) > 14 and raw[14] == KEY_STANDBY:
                 return {"from": frm, "source": None,
-                        "activity": 0x06, "track": None}   # Standby
+                        "activity": 0x06, "track": None,
+                        "standby": True}                   # Standby
             return None
         return None
     except Exception:
         return None
 
 
-class MLState:
+class _MasterState:
+    """One master's view -- am (audio path) or vm (video path)."""
+
     def __init__(self) -> None:
         self.source: Optional[int] = None
         self.activity: Optional[int] = None
@@ -262,10 +292,9 @@ class MLState:
         self.frm: Optional[int] = None
         self.origin: Optional[str] = None
 
-    def update(self, raw: bytes, origin: str) -> bool:
-        d = parse_ml(raw)
-        if d is None:
-            return False
+    def apply(self, d: dict, origin: str) -> bool:
+        """Overlay the parsed fields; returns True if the published view
+        (source/activity/track) changed."""
         before = (self.source, self.activity, self.track)
         if d.get("source") is not None:
             self.source = d["source"]
@@ -276,6 +305,17 @@ class MLState:
         self.frm = d.get("from")
         self.origin = origin
         return (self.source, self.activity, self.track) != before
+
+    def set_idle(self, activity: int, origin: str) -> bool:
+        """Source-less standby/release: mark not-playing but keep the
+        last source (so you can still see what was playing). No-op if
+        this slot never had a source."""
+        if self.source is None:
+            return False
+        before = self.activity
+        self.activity = activity
+        self.origin = origin
+        return self.activity != before
 
     def as_blob(self) -> dict:
         return {
@@ -289,6 +329,38 @@ class MLState:
             "track": self.track,
             "from": _hexb(self.frm),
             "origin": self.origin,
+        }
+
+
+class MLState:
+    """The ML view, split by master: am (audio) and vm (video). Each
+    source-carrying telegram is routed to a slot by source category
+    (SOURCE_KIND), so the two never clobber each other -- a video
+    STATUS_INFO can't overwrite the active audio source. Source-less
+    standby/release marks whatever was playing in each slot as idle."""
+
+    def __init__(self) -> None:
+        self.am = _MasterState()
+        self.vm = _MasterState()
+
+    def update(self, raw: bytes, origin: str) -> bool:
+        d = parse_ml(raw)
+        if d is None:
+            return False
+        src = d.get("source")
+        if src is not None and src in SOURCE_KIND:
+            slot = self.am if SOURCE_KIND[src] == "am" else self.vm
+            return slot.apply(d, origin)
+        if d.get("standby"):
+            c_am = self.am.set_idle(d["activity"], origin)
+            c_vm = self.vm.set_idle(d["activity"], origin)
+            return c_am or c_vm
+        return False
+
+    def as_blob(self) -> dict:
+        return {
+            "am": self.am.as_blob(),
+            "vm": self.vm.as_blob(),
             "updated": _now_iso(),
         }
 
@@ -513,18 +585,19 @@ def _startup_query(r: "redis.StrictRedis", ml: "MLState",
     non-disruptive, and it makes the AM broadcast a full STATUS_INFO
     with CH_TRACK which the listen loop then parses.
     """
+    # The query/GOTO concern the audio path, so we track the am slot.
     def _wait_source(timeout: float) -> None:
         # Poll in small steps so we proceed the instant the reply lands.
         steps = max(1, int(timeout / 0.2))
         for _ in range(steps):
-            if stop.is_set() or ml.source is not None:
+            if stop.is_set() or ml.am.source is not None:
                 return
             stop.wait(0.2)
 
     queries = [(_build_source_query(link_addr, m), m) for m in QUERY_MASTERS]
     # Phase 1: learn the source.
     for i in range(attempts):
-        if stop.is_set() or ml.source is not None:
+        if stop.is_set() or ml.am.source is not None:
             break
         for q, master in queries:
             try:
@@ -540,11 +613,12 @@ def _startup_query(r: "redis.StrictRedis", ml: "MLState",
     # source. Only for known audio sources, and only if we don't already
     # have a track (a spontaneous STATUS_INFO may have supplied it).
     if (do_goto and not stop.is_set()
-            and ml.source in AUDIO_SOURCES and ml.track is None):
+            and ml.am.source in AUDIO_SOURCES and ml.am.track is None):
+        src = ml.am.source
         try:
-            r.publish(REDIS_ML_TX, _build_goto(link_addr, ml.source))
+            r.publish(REDIS_ML_TX, _build_goto(link_addr, src))
             log(f"goto-refresh -> AM (join current source "
-                f"0x{ml.source:02x} as link 0x{link_addr:02x}) to fetch track")
+                f"0x{src:02x} as link 0x{link_addr:02x}) to fetch track")
         except redis.exceptions.RedisError:
             pass
 

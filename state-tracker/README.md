@@ -25,38 +25,53 @@ redis-cli PSUBSCRIBE 'link:*:state'      # watch all three live
 ```
 
 ### `state:ml`
+
+ML has two independent masters, so the blob is split into an **`am`**
+(Audio Master / audio path) and a **`vm`** (Video Master / video path)
+view, plus a top-level `updated`:
+
 ```json
-{ "source": "0xa1", "source_name": "N.RADIO",
-  "activity": "0x02", "activity_name": "Playing", "playing": true,
-  "track": 5, "from": "0xc2", "origin": "rx",
-  "updated": "2026-05-20T21:14:03.122" }
+{
+  "am": { "source": "0x8d", "source_name": "CD",
+          "activity": "0x02", "activity_name": "Playing", "playing": true,
+          "track": 7, "from": "0xc1", "origin": "rx" },
+  "vm": { "source": "0x1f", "source_name": "DTV",
+          "activity": "0x02", "activity_name": "Playing", "playing": true,
+          "track": null, "from": "0xc0", "origin": "rx" },
+  "updated": "2026-06-14T16:17:55.213"
+}
 ```
-Tracked from `STATUS_INFO` (0x87) + `TRACK_INFO_LONG` (0x82). `playing`
-is the simple "is it actually playing" flag (`activity == Playing`).
 
-**Off / standby**: a `STANDBY` (0x10) or `RELEASE` (0x11) telegram, or a
-virtual-Beo4 `STANDBY` keypress (0x0C), flips `activity` to Standby/Stop
-and `playing` to `false`. `source_name` keeps the last source (so you can
-see *what* was playing) — read `playing` / `activity_name` for the
-on/off state.
+Each source-carrying telegram is routed to a slot by **source category**
+(audio sources → `am`, video sources → `vm`), *not* by who sent it — so
+an audio source announced by the Source Center (`0xc2`, e.g. our own
+AirPlay N.RADIO) still lands in `am` without giving the non-master SC its
+own slot, and a video `STATUS_INFO` can never overwrite the active audio
+source (or vice-versa). `playing` is the simple `activity == Playing`
+flag. `from` records which device last updated that slot.
 
-Also tracked: `REQUEST_DISTRIBUTED_SOURCE` responses (0x08, source at the
-reply's `raw[13]`) and `TRACK_INFO` CURRENT_SOURCE (0x44 kind 0x05) — both
-ride the link-join handshake and the startup query (below).
+Tracked from `STATUS_INFO` (0x87), `TRACK_INFO_LONG` (0x82),
+`TRACK_INFO` CURRENT_SOURCE (0x44 kind 0x05), and
+`REQUEST_DISTRIBUTED_SOURCE` replies (0x08, source at the reply's
+`raw[13]` — rides the link-join handshake and the startup query below).
 
-**Off / standby**: a `STANDBY` (0x10) or `RELEASE` (0x11) telegram, or a
-virtual-Beo4 `STANDBY` keypress (0x0C), flips `activity` to Standby/Stop
-and `playing` to `false`. `source_name` keeps the last source (so you can
-see *what* was playing) — read `playing` / `activity_name` for the
-on/off state.
+**Off / standby**: a `STANDBY` (0x10) / `RELEASE` (0x11) telegram, or a
+virtual-Beo4 `STANDBY` keypress (0x0C), flips the affected slot(s) to
+Standby/Stop and `playing` to `false` while keeping `source_name` (so you
+can still see what *was* playing). A source-less standby idles whatever
+was playing in both slots.
+
+**`vm` is best-effort.** The AM is queryable (the startup query/GOTO
+fills `am` proactively), but the VM answers the query with an empty ack,
+so `vm` only populates **passively** from spontaneous VM broadcasts when
+a video source changes — it's often empty until then.
 
 **Robustness**: STATUS_INFO frames are accepted only when the source byte
 is a known ML source. The bus carries short stub STATUS_INFO frames
-(pl_len=0, where byte 10 is actually the checksum) and VM frames
-advertising transient/non-audio bytes; both used to flicker the source to
-junk like `0xe3 -> "?"`. Those are now dropped, so a good source isn't
-clobbered. `origin` is `rx` (a real device announced it) or `tx` (our own
-bridge did).
+(pl_len=0, where byte 10 is actually the checksum) and frames advertising
+transient/non-audio bytes; both used to flicker the source to junk like
+`0xe3 -> "?"`. Those are now dropped. `origin` is `rx` (a real device
+announced it) or `tx` (our own bridge did).
 
 **Startup source query**: the active source's STATUS_INFO is only
 broadcast spontaneously, so right after the daemon starts `state:ml`
