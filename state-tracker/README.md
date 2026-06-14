@@ -125,6 +125,9 @@ These are the only telegrams the tracker transmits. Flags:
                     cost of no track until the next spontaneous broadcast
 --no-discover       disable device discovery: no startup sweep, no
                     state:ml:devices key, ignore link:ml:discover
+--sweep-passes N    probes per address per sweep (default 2). 1 = single
+                    quick pass (~half the traffic, ~20% chance of missing
+                    a present device); higher = more thorough on noisy buses
 ```
 
 Use `--no-query` (or a free `--query-addr`) if a real link-room speaker
@@ -168,9 +171,13 @@ are currently present. `count`/`first_seen`/`last_seen` are bookkeeping.
 sent `TO` an address makes a device at that address answer with a
 `MASTER_PRESENT` response carrying its class byte. The tracker sweeps the
 **low device range** (`0x01`–`0x7f`) plus the **known high addresses**
-(`0xc0` VM, `0xc1` AM, `0xc2` SC, `0xf0` MLGW), two passes (a pong lands
-~80 % of the time, so a second pass fills the gaps), pacing one probe every
-~40 ms. The AM (`0xc1`) is probed explicitly — a master answers a directed
+(`0xc0` VM, `0xc1` AM, `0xc2` SC, `0xf0` MLGW), pacing one probe every
+~40 ms. By default it makes **two passes** over the range (a pong lands
+~80 % of the time, so a second pass drops the per-device miss rate to
+~4 %) — so each address is probed twice in the TX log, but it's still
+**one** sweep and `state:ml:devices` publishes once at the end. Tune the
+pass count with `--sweep-passes` (`1` = single quick pass, less traffic).
+The AM (`0xc1`) is probed explicitly — a master answers a directed
 `MASTER_PRESENT` with class `0x01`, and that's the only way to tell a real
 AM apart from a **VM-only system**, where `0xc1` simply stays silent.
 Probes are sent **FROM a master** (devices pong to a master) — the VM

@@ -751,10 +751,16 @@ def _publish_devices(r: "redis.StrictRedis", inv: "DeviceInventory",
 
 
 def _run_sweep(r: "redis.StrictRedis", inv: "DeviceInventory",
-               stop: threading.Event, full: bool = False) -> None:
+               stop: threading.Event, full: bool = False,
+               passes: int = SWEEP_PASSES) -> None:
     """Fire MASTER_PRESENT probes across the address range; pongs are
     captured by the listen loop into the inventory. Then publish the
     inventory. Probes spoof FROM a master (the device pongs to a master).
+
+    `passes` is how many times each address is probed in one sweep: a
+    single probe only gets a pong ~80 % of the time, so >1 pass lowers the
+    chance of missing a present device (the cost is more bus traffic). It's
+    one logical sweep regardless -- the inventory publishes once at the end.
 
     Single-flight: if a sweep is already running (e.g. the startup sweep
     is still going when a manual trigger arrives), the new request is
@@ -764,11 +770,12 @@ def _run_sweep(r: "redis.StrictRedis", inv: "DeviceInventory",
         log("discovery sweep already in progress; ignoring trigger")
         return
     try:
+        passes = max(1, passes)
         addrs = (list(range(0x01, 0xFF)) if full
                  else list(SWEEP_LOW_RANGE) + SWEEP_KNOWN_HIGH)
-        log(f"discovery sweep: {len(addrs)} addrs x{SWEEP_PASSES} "
+        log(f"discovery sweep: {len(addrs)} addrs x{passes} "
             f"({'full' if full else 'default'} range)")
-        for _ in range(SWEEP_PASSES):
+        for _ in range(passes):
             for addr in addrs:
                 if stop.is_set():
                     return
@@ -858,7 +865,8 @@ def _startup_query(r: "redis.StrictRedis", ml: "MLState",
 
 def listen(redis_host: str, redis_port: int, stop: threading.Event,
            query_addr: Optional[int] = DEFAULT_QUERY_ADDR,
-           do_goto: bool = True, discover: bool = True) -> None:
+           do_goto: bool = True, discover: bool = True,
+           sweep_passes: int = SWEEP_PASSES) -> None:
     r = redis.StrictRedis(host=redis_host, port=redis_port, db=0,
                           socket_keepalive=True)
     ml, dl80, dl86 = MLState(), DL80State(), DL86State()
@@ -892,7 +900,8 @@ def listen(redis_host: str, redis_port: int, stop: threading.Event,
     if discover:
         threading.Thread(
             target=_run_sweep, args=(r, inv, stop),
-            kwargs={"full": False}, name="startup-sweep", daemon=True).start()
+            kwargs={"full": False, "passes": sweep_passes},
+            name="startup-sweep", daemon=True).start()
 
     pubsub: Optional[redis.client.PubSub] = None
     try:
@@ -921,8 +930,8 @@ def listen(redis_host: str, redis_port: int, stop: threading.Event,
                     full = data.lower() == "full"
                     threading.Thread(
                         target=_run_sweep, args=(r, inv, stop),
-                        kwargs={"full": full}, name="sweep",
-                        daemon=True).start()
+                        kwargs={"full": full, "passes": sweep_passes},
+                        name="sweep", daemon=True).start()
                     continue
 
                 bus, origin = next(((b, o) for c, b, o in CHANNELS if c == ch),
@@ -1009,6 +1018,12 @@ def main() -> int:
                          f"{DISCOVER_CH} trigger. The inventory is built by "
                          "actively probing the bus, so this keeps the daemon "
                          "strictly passive on the discovery front.")
+    ap.add_argument("--sweep-passes", type=int, default=SWEEP_PASSES,
+                    help=f"how many times each address is probed per sweep "
+                         f"(default {SWEEP_PASSES}). A single probe pongs "
+                         f"~80%% of the time, so 2 passes lower the miss rate "
+                         f"to ~4%%; set 1 for a single quick pass (less bus "
+                         f"traffic, higher chance of missing a device).")
     args = ap.parse_args()
 
     query_addr = None
@@ -1024,7 +1039,8 @@ def main() -> int:
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
 
     listen(args.redis_host, args.redis_port, stop, query_addr=query_addr,
-           do_goto=not args.no_goto, discover=not args.no_discover)
+           do_goto=not args.no_goto, discover=not args.no_discover,
+           sweep_passes=max(1, args.sweep_passes))
     return 0
 
 
