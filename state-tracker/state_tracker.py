@@ -70,7 +70,7 @@ def _hexb(v: Optional[int]) -> Optional[str]:
 # ============================================================================
 
 REDIS_ML_RX    = "link:ml:receive"
-REDIS_ML_TX    = "link:ml:transmit"
+REDIS_ML_TX    = "link:ml:transmit"   # also where we publish the source query
 REDIS_DL80_RX  = "link:dl80:receive"
 REDIS_DL80_TX  = "link:dl80:transmit"
 REDIS_DL86_RX  = "link:dl86:receive"
@@ -97,12 +97,32 @@ CHANNELS = [
 
 PT_STATUS_INFO      = 0x87
 PT_TRACK_INFO_LONG  = 0x82
+PT_TRACK_INFO       = 0x44      # TRACK_INFO; kind 0x05 = CURRENT_SOURCE
+PT_GOTO_SOURCE      = 0x45
+PT_REQ_DIST_SOURCE  = 0x08      # REQUEST_DISTRIBUTED_SOURCE
 PT_STANDBY          = 0x10
 PT_RELEASE          = 0x11
 PT_VIRTUAL_BEO4     = 0x20      # MLGW_REMOTE_BEO4 (virtual keypress)
+TT_RESPONSE         = 0x14
+TT_REQUEST          = 0x0B
 KEY_STANDBY         = 0x0C      # Beo4 STANDBY
 ADDR_MLGW           = 0xF0      # virtual keys to MLGW are home-automation,
                                 # not transport -- ignore those here
+ADDR_AM             = 0xC1
+
+# Source-query telegram. Emulates a link room speaker asking the Audio
+# Master "what source are you distributing?" -- the only NON-DISRUPTIVE
+# way to read the current source on demand (verified: CD/radio kept
+# playing). The AM answers a link device (not the master), so FROM must
+# be a link-room address (default 0x06, as captured). The reply is a
+# RESPONSE (0x14) PT_REQ_DIST_SOURCE with the source byte at raw[13]:
+#   TX  c1 06 01 0b 00 00 00 08 00 01     (TO=AM FROM=0x06 REQUEST)
+#   RX  06 c1 01 14 00 00 00 08 05 06 02 01 00 <SRC> 01
+DEFAULT_QUERY_ADDR  = 0x06
+def _build_source_query(link_addr: int) -> str:
+    # body only; the broker appends checksum + EOL.
+    return bytes([ADDR_AM, link_addr, 0x01, TT_REQUEST,
+                  0x00, 0x00, 0x00, PT_REQ_DIST_SOURCE, 0x00, 0x01]).hex()
 
 ML_SOURCE_NAMES = {
     0x00: "NONE", 0x0B: "TV", 0x15: "V.MEM", 0x16: "DVD2", 0x1F: "DTV",
@@ -174,6 +194,26 @@ def parse_ml(raw: bytes) -> Optional[dict]:
                     "source": src if src in ML_SOURCE_NAMES else None,
                     "activity": 0x06 if pt == PT_STANDBY else 0x01,
                     "track": None}
+
+        if pt == PT_REQ_DIST_SOURCE and raw[3] == TT_RESPONSE:
+            # Reply to a distributed-source query (ours, or a real link
+            # speaker joining). Source byte at raw[13]. A distributed
+            # source is by definition active -> mark Playing.
+            if pl < 5 or len(raw) < 14:
+                return None
+            src = raw[13]
+            if src not in ML_SOURCE_NAMES or src == 0x00:
+                return None
+            return {"from": frm, "source": src,
+                    "activity": 0x02, "track": None}
+
+        if pt == PT_TRACK_INFO and pl >= 0x0b and len(raw) >= 12:
+            # TRACK_INFO kind (raw[9]) 0x05 = CURRENT_SOURCE: the AM's
+            # authoritative "the current source is X", source at raw[11].
+            if raw[9] == 0x05 and raw[11] in ML_SOURCE_NAMES:
+                return {"from": frm, "source": raw[11],
+                        "activity": 0x02, "track": None}
+            return None
 
         if pt == PT_VIRTUAL_BEO4 and to != ADDR_MLGW:
             # A virtual Beo4 keypress. We only care about STANDBY here --
@@ -433,7 +473,29 @@ def _publish(r: "redis.StrictRedis", bus: str, blob: dict) -> None:
     r.publish(EVENT_CHAN[bus], s)
 
 
-def listen(redis_host: str, redis_port: int, stop: threading.Event) -> None:
+def _startup_query(r: "redis.StrictRedis", ml: "MLState",
+                   stop: threading.Event, link_addr: int,
+                   attempts: int = 5, interval: float = 3.0) -> None:
+    """Populate state:ml at startup by emulating a link-room-speaker
+    asking the AM what source it's distributing. Non-disruptive (the
+    normal link-join query). Fires up to `attempts` times, stopping as
+    soon as we have a source (from the reply or a spontaneous
+    broadcast)."""
+    q = _build_source_query(link_addr)
+    for i in range(attempts):
+        if stop.is_set() or ml.source is not None:
+            return
+        try:
+            r.publish(REDIS_ML_TX, q)
+            log(f"source query -> AM (as link 0x{link_addr:02x}), "
+                f"attempt {i + 1}/{attempts}")
+        except redis.exceptions.RedisError:
+            pass
+        stop.wait(interval)
+
+
+def listen(redis_host: str, redis_port: int, stop: threading.Event,
+           query_addr: Optional[int] = DEFAULT_QUERY_ADDR) -> None:
     r = redis.StrictRedis(host=redis_host, port=redis_port, db=0,
                           socket_keepalive=True)
     ml, dl80, dl86 = MLState(), DL80State(), DL86State()
@@ -446,6 +508,14 @@ def listen(redis_host: str, redis_port: int, stop: threading.Event) -> None:
         except redis.exceptions.RedisError:
             pass
     log(f"state tracker up; keys: {', '.join(STATE_KEY.values())}")
+
+    # Kick off the non-disruptive source query (unless disabled). Runs in
+    # a daemon thread so the listen loop is already receiving when the
+    # AM's reply arrives.
+    if query_addr is not None:
+        threading.Thread(
+            target=_startup_query, args=(r, ml, stop, query_addr),
+            name="startup-query", daemon=True).start()
 
     pubsub: Optional[redis.client.PubSub] = None
     try:
@@ -524,13 +594,29 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n", 1)[0])
     ap.add_argument("--redis-host", default="localhost")
     ap.add_argument("--redis-port", type=int, default=6379)
+    ap.add_argument("--query-addr", default=hex(DEFAULT_QUERY_ADDR),
+                    help="link-room address to emulate for the startup "
+                         "source query (default 0x06, as captured). Must be "
+                         "a link device the AM will answer -- NOT a master.")
+    ap.add_argument("--no-query", action="store_true",
+                    help="disable the startup source query (purely passive; "
+                         "use this if a real link speaker occupies the query "
+                         "address)")
     args = ap.parse_args()
+
+    query_addr = None
+    if not args.no_query:
+        try:
+            query_addr = int(args.query_addr, 0) & 0xFF
+        except ValueError:
+            print(f"[state] bad --query-addr {args.query_addr!r}", file=sys.stderr)
+            return 2
 
     stop = threading.Event()
     signal.signal(signal.SIGINT,  lambda *_: stop.set())
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
 
-    listen(args.redis_host, args.redis_port, stop)
+    listen(args.redis_host, args.redis_port, stop, query_addr=query_addr)
     return 0
 
 

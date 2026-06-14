@@ -40,6 +40,16 @@ and `playing` to `false`. `source_name` keeps the last source (so you can
 see *what* was playing) — read `playing` / `activity_name` for the
 on/off state.
 
+Also tracked: `REQUEST_DISTRIBUTED_SOURCE` responses (0x08, source at the
+reply's `raw[13]`) and `TRACK_INFO` CURRENT_SOURCE (0x44 kind 0x05) — both
+ride the link-join handshake and the startup query (below).
+
+**Off / standby**: a `STANDBY` (0x10) or `RELEASE` (0x11) telegram, or a
+virtual-Beo4 `STANDBY` keypress (0x0C), flips `activity` to Standby/Stop
+and `playing` to `false`. `source_name` keeps the last source (so you can
+see *what* was playing) — read `playing` / `activity_name` for the
+on/off state.
+
 **Robustness**: STATUS_INFO frames are accepted only when the source byte
 is a known ML source. The bus carries short stub STATUS_INFO frames
 (pl_len=0, where byte 10 is actually the checksum) and VM frames
@@ -47,6 +57,27 @@ advertising transient/non-audio bytes; both used to flicker the source to
 junk like `0xe3 -> "?"`. Those are now dropped, so a good source isn't
 clobbered. `origin` is `rx` (a real device announced it) or `tx` (our own
 bridge did).
+
+**Startup source query**: the active source's STATUS_INFO is only
+broadcast spontaneously, so right after the daemon starts `state:ml`
+would be `Unknown` until the next broadcast. To fill it immediately the
+tracker emulates a link-room speaker asking the AM what it's
+distributing — `REQUEST_DISTRIBUTED_SOURCE` sent `FROM` a link address
+(default `0x06`) `TO` the AM. The AM answers a link device (not the
+master) with the source byte, and this is **non-disruptive** — it's the
+normal link-join query; playback keeps going. The query fires a few times
+at startup and stops as soon as a source is known. In practice `state:ml`
+is populated within ~1 s of start.
+
+This is the only thing the tracker transmits. Flags:
+
+```
+--query-addr 0x06   link-room address to emulate (default 0x06)
+--no-query          disable the query entirely (purely passive)
+```
+
+Use `--no-query` (or pick a free `--query-addr`) if a real link-room
+speaker already occupies `0x06`, to avoid an address clash.
 
 ### `state:dl86`
 ```json
