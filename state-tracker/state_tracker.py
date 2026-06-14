@@ -267,6 +267,16 @@ def parse_ml(raw: bytes) -> Optional[dict]:
                         "activity": 0x02, "track": None}
             return None
 
+        if pt == PT_GOTO_SOURCE and len(raw) >= 12:
+            # "go to source" -- source at raw[11]. We use it mainly to
+            # learn which source a master is switching to (notably the
+            # VM switching back from video to an audio source, which is
+            # how we clear the video slot). No track (GOTO CH_TRACK is
+            # 0/unspecified), so we don't overwrite a known track.
+            if raw[11] in ML_SOURCE_NAMES:
+                return {"from": frm, "source": raw[11], "activity": 0x02}
+            return None
+
         if pt == PT_VIRTUAL_BEO4 and to != ADDR_MLGW:
             # A virtual Beo4 keypress. We only care about STANDBY here --
             # it's the clearest "system going off" signal (captured off
@@ -305,6 +315,10 @@ class _MasterState:
         self.frm = d.get("from")
         self.origin = origin
         return (self.source, self.activity, self.track) != before
+
+    def clear(self) -> None:
+        self.source = self.activity = self.track = None
+        self.frm = self.origin = None
 
     def as_blob(self) -> dict:
         return {
@@ -345,10 +359,22 @@ class MLState:
         if d is None:
             return False
         src = d.get("source")
-        if src is not None and src in SOURCE_KIND:
-            slot = self.am if SOURCE_KIND[src] == "am" else self.vm
-            return slot.apply(d, origin)
-        return False                    # source-less standby/etc: ignore
+        frm = d.get("from")
+        if src is None or src not in SOURCE_KIND:
+            return False                # source-less standby/etc: ignore
+        if SOURCE_KIND[src] == "vm":
+            return self.vm.apply(d, origin)
+        # Audio source -> am.
+        changed = self.am.apply(d, origin)
+        # If the Video Master itself reports an audio source, it isn't
+        # showing any video -> clear the video slot. This is how
+        # switching the VM back from a video source to an audio source
+        # (e.g. DTV -> CD, which the VM announces as GOTO_SOURCE c0->CD)
+        # nulls the stale video entry.
+        if frm == ADDR_VM and self.vm.source is not None:
+            self.vm.clear()
+            changed = True
+        return changed
 
     def as_blob(self) -> dict:
         return {
