@@ -110,7 +110,6 @@ PT_MASTER_PRESENT   = 0x04      # presence ping (REQUEST) / pong (RESPONSE)
 PT_STANDBY          = 0x10
 PT_RELEASE          = 0x11
 PT_VIRTUAL_BEO4     = 0x20      # MLGW_REMOTE_BEO4 (virtual keypress)
-TT_CONFIG           = 0x5E      # device self-announce telegram type
 TT_RESPONSE         = 0x14
 TT_REQUEST          = 0x0B
 KEY_STANDBY         = 0x0C      # Beo4 STANDBY
@@ -658,12 +657,11 @@ def _build_mp_probe(addr: int, prober: int) -> str:
 class DeviceInventory:
     """Passive + active inventory of ML bus addresses. Fed from every
     RECEIVED telegram (never our own TX, so spoofed-FROM probes can't
-    create phantom devices). An MP pong's class byte and a CONFIG
-    self-announce's device-id enrich the entry."""
+    create phantom devices). An MP pong's class byte enriches the entry."""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._devs: dict = {}     # addr -> {first_seen,last_seen,count,class,device_id}
+        self._devs: dict = {}     # addr -> {first_seen,last_seen,count,class}
         self._rev = 0             # bumps only on a STRUCTURAL change
         self._published_rev = -1  # last rev handed to _publish_devices
         self.sweep_gate = threading.Lock()   # single-flight: one sweep at a time
@@ -678,26 +676,19 @@ class DeviceInventory:
             ttype = raw[3]
             pt = raw[7]
             klass = None
-            dev_id = None
             if pt == PT_MASTER_PRESENT and ttype == TT_RESPONSE and len(raw) > 10:
                 klass = raw[10]                       # pong device class
-            if ttype == TT_CONFIG and pt == PT_REQ_DIST_SOURCE and len(raw) >= 14:
-                dev_id = raw[11:14].hex()             # CONFIG "01 <addr> <id3>"
             now = _now_iso()
             with self._lock:
                 d = self._devs.get(frm)
                 if d is None:
-                    d = {"first_seen": now, "count": 0,
-                         "class": None, "device_id": None}
+                    d = {"first_seen": now, "count": 0, "class": None}
                     self._devs[frm] = d
                     self._rev += 1                    # new address appeared
                 d["last_seen"] = now
                 d["count"] += 1
                 if klass is not None and d["class"] != klass:
                     d["class"] = klass
-                    self._rev += 1
-                if dev_id is not None and d["device_id"] != dev_id:
-                    d["device_id"] = dev_id
                     self._rev += 1
         except Exception:
             pass
@@ -728,7 +719,6 @@ class DeviceInventory:
                     "class": (DEVICE_CLASS_NAMES.get(d["class"])
                               if d["class"] is not None else None),
                     "class_byte": _hexb(d["class"]),
-                    "device_id": d["device_id"],
                     "present": is_present,
                     "count": d["count"],
                     "first_seen": d["first_seen"],

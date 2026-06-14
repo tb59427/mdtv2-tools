@@ -146,7 +146,7 @@ passive observation of normal traffic.
 {
   "devices": {
     "0x06": { "role": null,  "class": "link",         "class_byte": "0x08",
-              "device_id": null, "present": true, "count": 3,
+              "present": true, "count": 3,
               "first_seen": "...", "last_seen": "..." },
     "0x6e": { "role": null,  "class": "video master", "class_byte": "0x02", ... },
     "0xc0": { "role": "VM",  "class": "video master", "class_byte": "0x02", ... },
@@ -162,8 +162,7 @@ Per address: `role` is a label for the fixed protocol addresses
 everything else (link nodes get dynamic addresses, so we don't guess a
 name). `class` comes from the MASTER_PRESENT reply's class byte —
 observed live as `0x01` audio master, `0x02` video master, `0x08` link
-node — with the raw byte kept in `class_byte`. `device_id` is filled when
-a device self-announces with a `CONFIG` telegram. `present` is true if the
+node — with the raw byte kept in `class_byte`. `present` is true if the
 address was seen within the last 5 minutes; `present_count` is how many
 are currently present. `count`/`first_seen`/`last_seen` are bookkeeping.
 
