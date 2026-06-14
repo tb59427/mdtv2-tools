@@ -126,10 +126,28 @@ ADDR_VM             = 0xC0
 #     topologies where the VM may carry the answer.
 DEFAULT_QUERY_ADDR  = 0x06
 QUERY_MASTERS       = (ADDR_AM, ADDR_VM)
+
+# Audio sources we'll "join" with a GOTO to fetch the track (see
+# _build_goto). Gating to these means we never accidentally GOTO a
+# video source or a junk byte.
+AUDIO_SOURCES = {0x6f, 0x79, 0x7a, 0x8d, 0x97, 0xa1}   # RADIO/A.MEM/N.MUSIC/CD/A.AUX/N.RADIO
+
+
 def _build_source_query(link_addr: int, master: int) -> str:
     # body only; the broker appends checksum + EOL.
     return bytes([master, link_addr, 0x01, TT_REQUEST,
                   0x00, 0x00, 0x00, PT_REQ_DIST_SOURCE, 0x00, 0x01]).hex()
+
+
+def _build_goto(link_addr: int, source: int) -> str:
+    """GOTO_SOURCE for the CURRENT source -- a link-join/re-announce, NOT
+    a source switch (so it's non-disruptive). Makes the AM re-broadcast
+    STATUS_INFO with CH_TRACK. Captured form:
+        c1 06 01 0b 00 00 00 45 07 01 02 <SRC> 00 02 01 00
+    """
+    return bytes([ADDR_AM, link_addr, 0x01, TT_REQUEST,
+                  0x00, 0x00, 0x00, PT_GOTO_SOURCE, 0x07,
+                  0x01, 0x02, source, 0x00, 0x02, 0x01, 0x00]).hex()
 
 ML_SOURCE_NAMES = {
     0x00: "NONE", 0x0B: "TV", 0x15: "V.MEM", 0x16: "DVD2", 0x1F: "DTV",
@@ -482,20 +500,32 @@ def _publish(r: "redis.StrictRedis", bus: str, blob: dict) -> None:
 
 def _startup_query(r: "redis.StrictRedis", ml: "MLState",
                    stop: threading.Event, link_addr: int,
+                   do_goto: bool = True,
                    attempts: int = 5, interval: float = 3.0) -> None:
-    """Populate state:ml at startup by emulating a link-room-speaker
-    asking the AM what source it's distributing. Non-disruptive (the
-    normal link-join query). Fires up to `attempts` times, stopping as
-    soon as we have a source (from the reply or a spontaneous
-    broadcast)."""
+    """Populate state:ml at startup by emulating a link-room speaker.
+
+    Phase 1 -- learn the source: ask both masters (AM 0xC1, VM 0xC0)
+    REQUEST_DISTRIBUTED_SOURCE. Non-disruptive read.
+
+    Phase 2 (if do_goto) -- fetch the track: once we know an audio
+    source but not its track, send GOTO_SOURCE for that SAME source.
+    That's a link-join/re-announce (not a switch), so it's
+    non-disruptive, and it makes the AM broadcast a full STATUS_INFO
+    with CH_TRACK which the listen loop then parses.
+    """
+    def _wait_source(timeout: float) -> None:
+        # Poll in small steps so we proceed the instant the reply lands.
+        steps = max(1, int(timeout / 0.2))
+        for _ in range(steps):
+            if stop.is_set() or ml.source is not None:
+                return
+            stop.wait(0.2)
+
     queries = [(_build_source_query(link_addr, m), m) for m in QUERY_MASTERS]
+    # Phase 1: learn the source.
     for i in range(attempts):
-        # Stop retrying once we know the source (from a reply or a
-        # spontaneous broadcast). The check is per-round, so the first
-        # round always asks BOTH masters even if the AM answers fast --
-        # the VM may be the authority in AM-absent topologies.
         if stop.is_set() or ml.source is not None:
-            return
+            break
         for q, master in queries:
             try:
                 r.publish(REDIS_ML_TX, q)
@@ -504,11 +534,24 @@ def _startup_query(r: "redis.StrictRedis", ml: "MLState",
             except redis.exceptions.RedisError:
                 pass
             stop.wait(0.3)        # small gap between the two masters
-        stop.wait(interval)
+        _wait_source(interval)    # break out the moment a reply arrives
+
+    # Phase 2: fetch the track via a join/re-announce of the current
+    # source. Only for known audio sources, and only if we don't already
+    # have a track (a spontaneous STATUS_INFO may have supplied it).
+    if (do_goto and not stop.is_set()
+            and ml.source in AUDIO_SOURCES and ml.track is None):
+        try:
+            r.publish(REDIS_ML_TX, _build_goto(link_addr, ml.source))
+            log(f"goto-refresh -> AM (join current source "
+                f"0x{ml.source:02x} as link 0x{link_addr:02x}) to fetch track")
+        except redis.exceptions.RedisError:
+            pass
 
 
 def listen(redis_host: str, redis_port: int, stop: threading.Event,
-           query_addr: Optional[int] = DEFAULT_QUERY_ADDR) -> None:
+           query_addr: Optional[int] = DEFAULT_QUERY_ADDR,
+           do_goto: bool = True) -> None:
     r = redis.StrictRedis(host=redis_host, port=redis_port, db=0,
                           socket_keepalive=True)
     ml, dl80, dl86 = MLState(), DL80State(), DL86State()
@@ -527,7 +570,7 @@ def listen(redis_host: str, redis_port: int, stop: threading.Event,
     # AM's reply arrives.
     if query_addr is not None:
         threading.Thread(
-            target=_startup_query, args=(r, ml, stop, query_addr),
+            target=_startup_query, args=(r, ml, stop, query_addr, do_goto),
             name="startup-query", daemon=True).start()
 
     pubsub: Optional[redis.client.PubSub] = None
@@ -615,6 +658,11 @@ def main() -> int:
                     help="disable the startup source query (purely passive; "
                          "use this if a real link speaker occupies the query "
                          "address)")
+    ap.add_argument("--no-goto", action="store_true",
+                    help="skip the startup GOTO-refresh that fetches the "
+                         "track (keeps the query read-only: source only, no "
+                         "phantom link-join). Track then comes from the next "
+                         "spontaneous broadcast.")
     args = ap.parse_args()
 
     query_addr = None
@@ -629,7 +677,8 @@ def main() -> int:
     signal.signal(signal.SIGINT,  lambda *_: stop.set())
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
 
-    listen(args.redis_host, args.redis_port, stop, query_addr=query_addr)
+    listen(args.redis_host, args.redis_port, stop, query_addr=query_addr,
+           do_goto=not args.no_goto)
     return 0
 
 

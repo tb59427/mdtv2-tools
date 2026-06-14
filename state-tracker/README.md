@@ -70,17 +70,31 @@ playback keeps going. On a typical AM+VM system the AM returns the audio
 source at the reply's `raw[13]`; the VM returns a bare ack here, but it's
 queried too so the daemon also works in VM-led / AM-absent topologies.
 The query fires a few times at startup and stops as soon as a source is
-known. In practice `state:ml` is populated within ~1 s of start.
+known.
 
-This is the only thing the tracker transmits. Flags:
+The `0x08` reply gives the **source** but not the track. To also fetch
+the **track/channel**, once the source is known the tracker sends a
+`GOTO_SOURCE` for that *same* source — a link-join / re-announce, **not**
+a source switch, so it stays non-disruptive (playback continues). The AM
+responds by broadcasting a full `STATUS_INFO` (with `CH_TRACK`), which
+the listen loop parses. In practice `state:ml` has the source within
+~1 s and the track within ~2 s of start.
+
+These are the only telegrams the tracker transmits. Flags:
 
 ```
 --query-addr 0x06   link-room address to emulate (default 0x06)
 --no-query          disable the query entirely (purely passive)
+--no-goto           do the source query but skip the GOTO-refresh: keeps
+                    it strictly read-only (no phantom link-join), at the
+                    cost of no track until the next spontaneous broadcast
 ```
 
-Use `--no-query` (or pick a free `--query-addr`) if a real link-room
-speaker already occupies `0x06`, to avoid an address clash.
+Use `--no-query` (or a free `--query-addr`) if a real link-room speaker
+occupies `0x06`. The GOTO-refresh registers the query address as
+momentarily "joined" in the AM's bookkeeping (benign — no audio is
+drawn, the source is already playing); `--no-goto` avoids even that if
+you want the query to be purely a read.
 
 ### `state:dl86`
 ```json
