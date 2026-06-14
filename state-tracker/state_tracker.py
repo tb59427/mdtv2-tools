@@ -354,6 +354,9 @@ class MLState:
         self.am = _MasterState()
         self.vm = _MasterState()
 
+    def _any_playing(self) -> bool:
+        return self.am.activity == 0x02 or self.vm.activity == 0x02
+
     def update(self, raw: bytes, origin: str) -> bool:
         d = parse_ml(raw)
         if d is None:
@@ -363,17 +366,26 @@ class MLState:
         if src is None or src not in SOURCE_KIND:
             return False                # source-less standby/etc: ignore
         if SOURCE_KIND[src] == "vm":
-            return self.vm.apply(d, origin)
-        # Audio source -> am.
-        changed = self.am.apply(d, origin)
-        # If the Video Master itself reports an audio source, it isn't
-        # showing any video -> clear the video slot. This is how
-        # switching the VM back from a video source to an audio source
-        # (e.g. DTV -> CD, which the VM announces as GOTO_SOURCE c0->CD)
-        # nulls the stale video entry.
-        if frm == ADDR_VM and self.vm.source is not None:
+            changed = self.vm.apply(d, origin)
+        else:
+            # Audio source -> am.
+            changed = self.am.apply(d, origin)
+            # If the Video Master itself reports an audio source, it isn't
+            # showing any video -> clear the video slot. This is how
+            # switching the VM back from a video source to an audio
+            # source (e.g. DTV -> CD, announced as GOTO_SOURCE c0->CD)
+            # nulls the stale video entry.
+            if frm == ADDR_VM and self.vm.source is not None:
+                self.vm.clear()
+                changed = True
+
+        # Fully-idle reset: once nothing is playing in either slot, null
+        # both so a powered-off / all-stopped system reads as a clean
+        # empty state instead of leaving stale "X Standby" entries.
+        if changed and not self._any_playing() \
+                and (self.am.source is not None or self.vm.source is not None):
+            self.am.clear()
             self.vm.clear()
-            changed = True
         return changed
 
     def as_blob(self) -> dict:

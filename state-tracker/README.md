@@ -57,13 +57,17 @@ Tracked from `STATUS_INFO` (0x87), `TRACK_INFO_LONG` (0x82),
 
 **Off / standby**: a `STANDBY` (0x10) / `RELEASE` (0x11) telegram that
 **names a source** idles that source's slot (`activity` → Standby/Stop,
-`playing` → false) while keeping `source_name` so you can still see what
-*was* playing. A power-off sends per-source RELEASEs, so each slot idles
-correctly. A **source-less** standby is deliberately ignored — it's
-ambiguous and doesn't imply audio stopped: when the VM switches its own
-screen to a video source it fires a source-less STANDBY at the AM, but
-the AM keeps distributing audio to other zones (e.g. a link room), so
-`am` must stay playing.
+`playing` → false). A power-off sends per-source RELEASEs, so each slot
+idles correctly. A **source-less** standby is deliberately ignored —
+it's ambiguous and doesn't imply audio stopped: when the VM switches its
+own screen to a video source it fires a source-less STANDBY at the AM,
+but the AM keeps distributing audio to other zones (e.g. a link room),
+so `am` must stay playing.
+
+**Fully-idle reset**: once *neither* slot is playing, both are nulled —
+a powered-off / all-stopped system reads as a clean empty state rather
+than leaving stale `CD Standby` / `TV Standby` entries. (While at least
+one slot is still playing, the other's idle/standby entry is kept.)
 
 **`vm` is best-effort.** The AM is queryable (the startup query/GOTO
 fills `am` proactively), but the VM answers the query with an empty ack,
