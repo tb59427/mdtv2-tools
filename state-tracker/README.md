@@ -137,8 +137,10 @@ These are the only telegrams the tracker transmits. Flags:
 --no-discover       disable device discovery: no startup sweep, no
                     state:ml:devices key, ignore link:ml:discover
 --sweep-passes N    probes per address per sweep (default 1). 1 = single
-                    quick pass (~20% chance of missing a present device);
-                    raise it (e.g. 2) for a more thorough scan on noisy buses
+                    pass; raise it (e.g. 2) for a second chance on a busy bus
+--sweep-gap S       seconds between probes (default 0.10). Sized so a quiet
+                    node's pong survives the masters' pong flood; lower only
+                    on a quiet bus (0.04 dropped 0x06)
 ```
 
 The address is auto-verified (above), so you normally don't need to touch
@@ -182,10 +184,18 @@ sent `TO` an address makes a device at that address answer with a
 `MASTER_PRESENT` response carrying its class byte. The tracker sweeps the
 **low device range** (`0x01`–`0x7f`) plus the **known high addresses**
 (`0xc0` VM, `0xc1` AM, `0xc2` SC, `0xf0` MLGW), pacing one probe every
-~40 ms. By default it makes a **single pass** over the range. A pong lands
-~80 % of the time, so a single pass may miss a present device (~20 %); for
-a more thorough scan raise `--sweep-passes` (e.g. `2` → ~4 % miss, at the
-cost of probing every address twice). Whatever the pass count, it's **one**
+**100 ms** (`--sweep-gap`), so a single pass over the default range takes
+~13 s.
+
+That gap matters: during a sweep the masters answer a *flood* of pongs, and
+on the half-duplex ML bus a **quiet link node's single pong collides with
+that traffic** if probes come too fast — at 40 ms `0x06` was lost entirely,
+at 100 ms it's caught reliably. So the gap is sized to let the bus clear
+between probes, not for raw speed.
+
+By default it makes a **single pass**. A pong lands ~80 % of the time, so
+raise `--sweep-passes` (e.g. `2`) for a second chance on a busy bus, at the
+cost of probing every address twice. Whatever the pass count, it's **one**
 sweep and `state:ml:devices` publishes once at the end.
 The AM (`0xc1`) is probed explicitly — a master answers a directed
 `MASTER_PRESENT` with class `0x01`, and that's the only way to tell a real
@@ -198,7 +208,7 @@ master's `FROM`, and counting those would invent phantoms.
 A sweep runs **once at startup** and **on demand**:
 
 ```sh
-redis-cli PUBLISH link:ml:discover ''       # default range (~11 s)
+redis-cli PUBLISH link:ml:discover ''       # default range (~13 s)
 redis-cli PUBLISH link:ml:discover full     # whole 0x01..0xfe space (~slow)
 redis-cli GET state:ml:devices              # read the result
 redis-cli SUBSCRIBE link:ml:devices         # or watch it change

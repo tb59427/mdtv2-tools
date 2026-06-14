@@ -651,7 +651,12 @@ BROADCAST_ADDRS = {0x00, 0x80, 0x81, 0x82, 0x83, 0xFF}
 # target -- devices pong to a master.
 SWEEP_LOW_RANGE = range(0x01, 0x80)          # 0x01..0x7f
 SWEEP_KNOWN_HIGH = [0xC0, 0xC1, 0xC2, 0xF0]  # VM, AM, SC, MLGW
-SWEEP_GAP_S = 0.04                           # pace between probes (~bus-safe)
+# Pace between probes. The masters answer a flood of pongs during the sweep,
+# and on the half-duplex ML bus a quiet link node's single pong collides with
+# that traffic if probes come too fast: 0.04 s lost 0x06 entirely, 0.10 s
+# catches it reliably. So give the bus time to clear between probes. The cost
+# is a slower sweep (~13 s for one pass over the default range).
+SWEEP_GAP_S = 0.10
 SWEEP_PASSES = 1                             # probes/addr/sweep; --sweep-passes
 DEVICE_STALE_S = 300                         # "present" = seen within 5 min
 
@@ -750,7 +755,7 @@ def _publish_devices(r: "redis.StrictRedis", inv: "DeviceInventory",
 
 def _run_sweep(r: "redis.StrictRedis", inv: "DeviceInventory",
                stop: threading.Event, full: bool = False,
-               passes: int = SWEEP_PASSES) -> None:
+               passes: int = SWEEP_PASSES, gap: float = SWEEP_GAP_S) -> None:
     """Fire MASTER_PRESENT probes across the address range; pongs are
     captured by the listen loop into the inventory. Then publish the
     inventory. Probes spoof FROM a master (the device pongs to a master).
@@ -771,7 +776,7 @@ def _run_sweep(r: "redis.StrictRedis", inv: "DeviceInventory",
         passes = max(1, passes)
         addrs = (list(range(0x01, 0xFF)) if full
                  else list(SWEEP_LOW_RANGE) + SWEEP_KNOWN_HIGH)
-        log(f"discovery sweep: {len(addrs)} addrs x{passes} "
+        log(f"discovery sweep: {len(addrs)} addrs x{passes} @ {gap*1000:.0f}ms "
             f"({'full' if full else 'default'} range)")
         for _ in range(passes):
             for addr in addrs:
@@ -786,7 +791,7 @@ def _run_sweep(r: "redis.StrictRedis", inv: "DeviceInventory",
                     r.publish(REDIS_ML_TX, _build_mp_probe(addr, prober))
                 except redis.exceptions.RedisError:
                     pass
-                stop.wait(SWEEP_GAP_S)
+                stop.wait(gap)
         stop.wait(0.5)                   # let the last pongs land
         try:
             _publish_devices(r, inv, force=True)
@@ -942,7 +947,8 @@ def _startup_query(r: "redis.StrictRedis", ml: "MLState",
 def listen(redis_host: str, redis_port: int, stop: threading.Event,
            query_addr: Optional[int] = DEFAULT_QUERY_ADDR,
            do_goto: bool = True, discover: bool = True,
-           sweep_passes: int = SWEEP_PASSES) -> None:
+           sweep_passes: int = SWEEP_PASSES,
+           sweep_gap: float = SWEEP_GAP_S) -> None:
     r = redis.StrictRedis(host=redis_host, port=redis_port, db=0,
                           socket_keepalive=True)
     ml, dl80, dl86 = MLState(), DL80State(), DL86State()
@@ -963,9 +969,25 @@ def listen(redis_host: str, redis_port: int, stop: threading.Event,
     log(f"state tracker up; keys: {', '.join(STATE_KEY.values())}"
         + (f", {STATE_DEVICES_KEY}" if discover else ""))
 
-    # Kick off the non-disruptive source query (unless disabled). Runs in
-    # a daemon thread so the listen loop is already receiving when the
-    # AM's reply arrives.
+    pubsub: Optional[redis.client.PubSub] = None
+
+    def _subscribe() -> None:
+        nonlocal pubsub
+        pubsub = r.pubsub()
+        pubsub.subscribe(*[ch for ch, _, _ in CHANNELS])
+        if discover:
+            pubsub.subscribe(DISCOVER_CH)
+
+    # Subscribe BEFORE kicking off the probers. The startup sweep probes the
+    # low addresses within ~0.2 s of starting, so if we spawned it first the
+    # listen loop could miss those earliest pongs (e.g. 0x06 at position ~6)
+    # and only pick the device up later from spontaneous traffic.
+    try:
+        _subscribe()
+    except redis.exceptions.RedisError:
+        pubsub = None
+
+    # Non-disruptive source query (verifies / falls back its address first).
     if query_addr is not None:
         threading.Thread(
             target=_startup_query, args=(r, ml, stop, query_addr, do_goto),
@@ -976,18 +998,15 @@ def listen(redis_host: str, redis_port: int, stop: threading.Event,
     if discover:
         threading.Thread(
             target=_run_sweep, args=(r, inv, stop),
-            kwargs={"full": False, "passes": sweep_passes},
+            kwargs={"full": False, "passes": sweep_passes,
+                    "gap": sweep_gap},
             name="startup-sweep", daemon=True).start()
 
-    pubsub: Optional[redis.client.PubSub] = None
     try:
         while not stop.is_set():
             try:
                 if pubsub is None:
-                    pubsub = r.pubsub()
-                    pubsub.subscribe(*[ch for ch, _, _ in CHANNELS])
-                    if discover:
-                        pubsub.subscribe(DISCOVER_CH)
+                    _subscribe()
                 m = pubsub.get_message(timeout=0.5,
                                        ignore_subscribe_messages=True)
                 if m is None:
@@ -1006,7 +1025,8 @@ def listen(redis_host: str, redis_port: int, stop: threading.Event,
                     full = data.lower() == "full"
                     threading.Thread(
                         target=_run_sweep, args=(r, inv, stop),
-                        kwargs={"full": full, "passes": sweep_passes},
+                        kwargs={"full": full, "passes": sweep_passes,
+                                "gap": sweep_gap},
                         name="sweep", daemon=True).start()
                     continue
 
@@ -1104,6 +1124,12 @@ def main() -> int:
                          f"quick but may miss a present device (~20%%); raise "
                          f"it (e.g. 2 -> ~4%% miss) to scan more thoroughly at "
                          f"the cost of more bus traffic.")
+    ap.add_argument("--sweep-gap", type=float, default=SWEEP_GAP_S,
+                    help=f"seconds between probes in a sweep (default "
+                         f"{SWEEP_GAP_S}). The masters flood pongs during a "
+                         f"sweep; too tight a gap and a quiet link node's "
+                         f"single pong collides with that traffic and is lost "
+                         f"(0.04 dropped 0x06). Lower only on a quiet bus.")
     args = ap.parse_args()
 
     query_addr = None
@@ -1120,7 +1146,8 @@ def main() -> int:
 
     listen(args.redis_host, args.redis_port, stop, query_addr=query_addr,
            do_goto=not args.no_goto, discover=not args.no_discover,
-           sweep_passes=max(1, args.sweep_passes))
+           sweep_passes=max(1, args.sweep_passes),
+           sweep_gap=max(0.0, args.sweep_gap))
     return 0
 
 
