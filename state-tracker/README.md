@@ -168,13 +168,15 @@ are currently present. `count`/`first_seen`/`last_seen` are bookkeeping.
 sent `TO` an address makes a device at that address answer with a
 `MASTER_PRESENT` response carrying its class byte. The tracker sweeps the
 **low device range** (`0x01`–`0x7f`) plus the **known high addresses**
-(`0xc0` VM, `0xc2` SC, `0xf0` MLGW), two passes (a pong lands ~80 % of the
-time, so a second pass fills the gaps), pacing one probe every ~40 ms. The
-AM (`0xc1`) is never probed — it isn't pinged that way; it's picked up from
-its own replies and broadcasts instead. Probes are sent **FROM a master**
-(devices pong to a master), so the inventory is fed **only from received
-telegrams** — our own probes spoof a master's `FROM`, and counting those
-would invent phantoms.
+(`0xc0` VM, `0xc1` AM, `0xc2` SC, `0xf0` MLGW), two passes (a pong lands
+~80 % of the time, so a second pass fills the gaps), pacing one probe every
+~40 ms. The AM (`0xc1`) is probed explicitly — a master answers a directed
+`MASTER_PRESENT` with class `0x01`, and that's the only way to tell a real
+AM apart from a **VM-only system**, where `0xc1` simply stays silent.
+Probes are sent **FROM a master** (devices pong to a master) — the VM
+probes everything, and the AM is only used to probe the VM — so the
+inventory is fed **only from received telegrams**: our own probes spoof a
+master's `FROM`, and counting those would invent phantoms.
 
 A sweep runs **once at startup** and **on demand**:
 

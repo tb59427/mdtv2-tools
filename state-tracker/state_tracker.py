@@ -637,10 +637,13 @@ KNOWN_ROLES = {0xC0: "VM", 0xC1: "AM", 0xC2: "SC", 0x02: "SC-aux", 0xF0: "MLGW"}
 BROADCAST_ADDRS = {0x00, 0x80, 0x81, 0x82, 0x83, 0xFF}
 
 # Sweep: low device range + the high addresses we know carry devices.
-# The AM (0xC1) is intentionally not probed -- it doesn't pong MP; it's
-# detected via the 0x08 source query / its own broadcasts instead.
+# The AM (0xC1) is probed explicitly: a master answers a directed
+# MASTER_PRESENT with its class byte (0x01), and an explicit probe is the
+# only way to tell "AM present" apart from a VM-only system (where 0xC1
+# simply stays silent). It's probed FROM the VM (0xC0), like every other
+# target -- devices pong to a master.
 SWEEP_LOW_RANGE = range(0x01, 0x80)          # 0x01..0x7f
-SWEEP_KNOWN_HIGH = [0xC0, 0xC2, 0xF0]        # VM, SC, MLGW
+SWEEP_KNOWN_HIGH = [0xC0, 0xC1, 0xC2, 0xF0]  # VM, AM, SC, MLGW
 SWEEP_GAP_S = 0.04                           # pace between probes (~bus-safe)
 SWEEP_PASSES = 2                             # MP pong is ~80%/try; 2 passes
 DEVICE_STALE_S = 300                         # "present" = seen within 5 min
@@ -760,8 +763,10 @@ def _run_sweep(r: "redis.StrictRedis", inv: "DeviceInventory",
         for addr in addrs:
             if stop.is_set():
                 return
-            if addr in BROADCAST_ADDRS or addr == ADDR_AM:
+            if addr in BROADCAST_ADDRS:
                 continue
+            # Probe FROM a master; use the AM only to probe the VM, the VM
+            # for everything else (including probing the AM itself).
             prober = ADDR_AM if addr == ADDR_VM else ADDR_VM
             try:
                 r.publish(REDIS_ML_TX, _build_mp_probe(addr, prober))
