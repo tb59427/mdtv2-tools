@@ -62,14 +62,20 @@ states (Playing, Fast-Forward, Rewind, Scan) keep the slot, so seeking
 doesn't flicker the source out and back. A powered-off system therefore
 reads as both slots all-null.
 
-Off signals: a `STANDBY` (0x10) / `RELEASE` (0x11) that **names a
-source** nulls that source's slot — but only if it's the source the
-slot is currently showing, so a standby for some *other* source can't
-wipe what's playing. A **source-less** standby is ignored (ambiguous,
-and doesn't imply audio stopped: when the VM switches its screen to
-video it fires a source-less STANDBY at the AM while the AM keeps
-serving audio to other zones). The VM returning to an audio source
-nulls the `vm` (video) slot.
+A slot is nulled when it goes inactive by one of:
+- an **inactive `STATUS_INFO` from the slot's own master** (AM `0xc1`
+  for audio, VM `0xc0` for video) — the master's whole path is off.
+  This clears regardless of the exact source byte, because a master
+  reports its *base* source on power-off (the VM announces TV `0x0b`
+  even when DTV `0x1f` was the active sub-source).
+- an inactive telegram that **names the exact source** the slot is
+  showing (e.g. a `RELEASE` for the current source when AirPlay stops).
+
+A **source-less** standby is ignored (ambiguous, and doesn't imply
+audio stopped: when the VM switches its screen to video it fires a
+source-less STANDBY at the AM while the AM keeps serving audio to other
+zones), as is a standby for some *other* source from a non-master. The
+VM returning to an audio source also nulls the `vm` (video) slot.
 
 **`vm` is best-effort.** The AM is queryable (the startup query/GOTO
 fills `am` proactively), but the VM answers the query with an empty ack,

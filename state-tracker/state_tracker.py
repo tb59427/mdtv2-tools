@@ -361,16 +361,30 @@ class MLState:
         self.vm = _MasterState()
 
     @staticmethod
-    def _apply_or_clear(slot: "_MasterState", d: dict, origin: str) -> bool:
-        """A slot shows a source only while it's actively in use. An
-        active-transport telegram (Playing/FF/RW/Scan) sets/updates the
-        slot; any inactive one (Stop/Standby/Unknown/No-Media) nulls it
-        -- but only when it concerns the source the slot is currently
-        showing, so a standby for some *other* source can't wipe what's
-        playing."""
+    def _apply_or_clear(slot: "_MasterState", d: dict, origin: str,
+                        pt: int, master_addr: int) -> bool:
+        """A slot shows a source only while it's actively in use.
+
+        Active-transport (Playing/FF/RW/Scan) sets/updates the slot. An
+        inactive telegram (Stop/Standby/Unknown/No-Media) nulls the slot
+        when either:
+          (a) it's a STATUS_INFO from the slot's OWN master going
+              inactive -- the master's whole path is off. This clears
+              regardless of the exact source byte, because a master
+              reports its *base* source on power-off (the VM announces
+              TV 0x0b even when DTV 0x1f was the active sub-source), or
+          (b) it names the exact source the slot is showing (e.g. a
+              RELEASE for the current source when AirPlay stops).
+        A standby for some other source from a non-master is ignored, so
+        it can't wipe what's playing."""
         if d.get("activity") in ACTIVE_ACTIVITIES:
             return slot.apply(d, origin)
-        if slot.source is not None and slot.source == d.get("source"):
+        if slot.source is None:
+            return False
+        if pt == PT_STATUS_INFO and d.get("from") == master_addr:
+            slot.clear()
+            return True
+        if slot.source == d.get("source"):
             slot.clear()
             return True
         return False
@@ -383,10 +397,11 @@ class MLState:
         frm = d.get("from")
         if src is None or src not in SOURCE_KIND:
             return False                # source-less standby/etc: ignore
+        pt = raw[7] if len(raw) >= 8 else 0
         if SOURCE_KIND[src] == "vm":
-            return self._apply_or_clear(self.vm, d, origin)
+            return self._apply_or_clear(self.vm, d, origin, pt, ADDR_VM)
         # Audio source -> am.
-        changed = self._apply_or_clear(self.am, d, origin)
+        changed = self._apply_or_clear(self.am, d, origin, pt, ADDR_AM)
         # If the Video Master itself reports an audio source, it isn't
         # showing any video -> clear the video slot. This is how switching
         # the VM back from a video source to an audio source (e.g.
