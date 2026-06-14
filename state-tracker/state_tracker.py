@@ -99,6 +99,10 @@ PT_STATUS_INFO      = 0x87
 PT_TRACK_INFO_LONG  = 0x82
 PT_STANDBY          = 0x10
 PT_RELEASE          = 0x11
+PT_VIRTUAL_BEO4     = 0x20      # MLGW_REMOTE_BEO4 (virtual keypress)
+KEY_STANDBY         = 0x0C      # Beo4 STANDBY
+ADDR_MLGW           = 0xF0      # virtual keys to MLGW are home-automation,
+                                # not transport -- ignore those here
 
 ML_SOURCE_NAMES = {
     0x00: "NONE", 0x0B: "TV", 0x15: "V.MEM", 0x16: "DVD2", 0x1F: "DTV",
@@ -121,19 +125,32 @@ def parse_ml(raw: bytes) -> Optional[dict]:
     malformed/short telegrams -- never throws). Offsets are absolute within
     the telegram (header[0..8], payload at [9]); they hold for both RX hex
     (full telegram incl. checksum+EOL) and TX hex (no trailing bytes)
-    because we index from the front."""
+    because we index from the front.
+
+    Robustness: STATUS_INFO / TRACK_INFO_LONG are accepted only when the
+    source byte is a *known* ML source. The bus carries short stub
+    STATUS_INFO frames (pl_len=0, e.g. the VM's `...870004e3` where the
+    `e3` is the checksum, not a source) and VM frames advertising
+    non-audio/transient bytes; both would otherwise clobber a good
+    source with garbage like 0xe3 -> "?". Gating on the known-source set
+    drops them cleanly."""
     try:
         if len(raw) < 9:
             return None
         pt = raw[7]
         pl = raw[8]
         frm = raw[1]
+        to = raw[0]
 
         if pt == PT_STATUS_INFO:
-            if len(raw) < 11:
+            # Need the full status payload for source(@10) + activity(@21)
+            # to be real, not checksum/EOL bytes of a short stub frame.
+            if len(raw) < 22 or pl < 0x0D:
                 return None
             source = raw[10]
-            activity = raw[21] if len(raw) > 21 else None
+            if source not in ML_SOURCE_NAMES:
+                return None                    # unknown/transient -> ignore
+            activity = raw[21]
             if pl < 27:
                 track = raw[19] if len(raw) > 19 else None
             elif len(raw) > 37:
@@ -146,15 +163,27 @@ def parse_ml(raw: bytes) -> Optional[dict]:
         if pt == PT_TRACK_INFO_LONG:
             if len(raw) < 14:
                 return None
+            if raw[11] not in ML_SOURCE_NAMES:
+                return None
             return {"from": frm, "source": raw[11],
                     "track": raw[12], "activity": raw[13]}
 
         if pt in (PT_STANDBY, PT_RELEASE):
             src = raw[4]                       # src_dest = source going idle
             return {"from": frm,
-                    "source": src if src else None,
+                    "source": src if src in ML_SOURCE_NAMES else None,
                     "activity": 0x06 if pt == PT_STANDBY else 0x01,
                     "track": None}
+
+        if pt == PT_VIRTUAL_BEO4 and to != ADDR_MLGW:
+            # A virtual Beo4 keypress. We only care about STANDBY here --
+            # it's the clearest "system going off" signal (captured off
+            # sequence: virtual_beo4 0x0C, then a RELEASE flurry). The
+            # key sits just past the 5-byte payload, at raw[14].
+            if len(raw) > 14 and raw[14] == KEY_STANDBY:
+                return {"from": frm, "source": None,
+                        "activity": 0x06, "track": None}   # Standby
+            return None
         return None
     except Exception:
         return None
@@ -191,6 +220,7 @@ class MLState:
             "activity": _hexb(self.activity),
             "activity_name": (ML_ACTIVITY_NAMES.get(self.activity, "?")
                               if self.activity is not None else None),
+            "playing": self.activity == 0x02,
             "track": self.track,
             "from": _hexb(self.frm),
             "origin": self.origin,
