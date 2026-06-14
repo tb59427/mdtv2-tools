@@ -109,19 +109,26 @@ KEY_STANDBY         = 0x0C      # Beo4 STANDBY
 ADDR_MLGW           = 0xF0      # virtual keys to MLGW are home-automation,
                                 # not transport -- ignore those here
 ADDR_AM             = 0xC1
+ADDR_VM             = 0xC0
 
-# Source-query telegram. Emulates a link room speaker asking the Audio
-# Master "what source are you distributing?" -- the only NON-DISRUPTIVE
-# way to read the current source on demand (verified: CD/radio kept
-# playing). The AM answers a link device (not the master), so FROM must
-# be a link-room address (default 0x06, as captured). The reply is a
-# RESPONSE (0x14) PT_REQ_DIST_SOURCE with the source byte at raw[13]:
-#   TX  c1 06 01 0b 00 00 00 08 00 01     (TO=AM FROM=0x06 REQUEST)
-#   RX  06 c1 01 14 00 00 00 08 05 06 02 01 00 <SRC> 01
+# Source-query telegram. Emulates a link room speaker asking a master
+# "what source are you distributing?" -- the only NON-DISRUPTIVE way to
+# read the current source on demand (verified: CD/radio kept playing).
+# A master answers a *link device* (not the other master), so FROM must
+# be a link-room address (default 0x06, as captured). We query BOTH
+# masters at startup:
+#   - AM (0xC1) answers with the distributed AUDIO source byte at raw[13]
+#     (RESPONSE 0x14, pl_len>=5):
+#       TX  c1 06 01 0b 00 00 00 08 00 01
+#       RX  06 c1 01 14 00 00 00 08 05 06 02 01 00 <SRC> 01
+#   - VM (0xC0) answers pl_len=0 (a bare ack, no source) on this system,
+#     but we query it too so the daemon also works in VM-led / AM-absent
+#     topologies where the VM may carry the answer.
 DEFAULT_QUERY_ADDR  = 0x06
-def _build_source_query(link_addr: int) -> str:
+QUERY_MASTERS       = (ADDR_AM, ADDR_VM)
+def _build_source_query(link_addr: int, master: int) -> str:
     # body only; the broker appends checksum + EOL.
-    return bytes([ADDR_AM, link_addr, 0x01, TT_REQUEST,
+    return bytes([master, link_addr, 0x01, TT_REQUEST,
                   0x00, 0x00, 0x00, PT_REQ_DIST_SOURCE, 0x00, 0x01]).hex()
 
 ML_SOURCE_NAMES = {
@@ -481,16 +488,22 @@ def _startup_query(r: "redis.StrictRedis", ml: "MLState",
     normal link-join query). Fires up to `attempts` times, stopping as
     soon as we have a source (from the reply or a spontaneous
     broadcast)."""
-    q = _build_source_query(link_addr)
+    queries = [(_build_source_query(link_addr, m), m) for m in QUERY_MASTERS]
     for i in range(attempts):
+        # Stop retrying once we know the source (from a reply or a
+        # spontaneous broadcast). The check is per-round, so the first
+        # round always asks BOTH masters even if the AM answers fast --
+        # the VM may be the authority in AM-absent topologies.
         if stop.is_set() or ml.source is not None:
             return
-        try:
-            r.publish(REDIS_ML_TX, q)
-            log(f"source query -> AM (as link 0x{link_addr:02x}), "
-                f"attempt {i + 1}/{attempts}")
-        except redis.exceptions.RedisError:
-            pass
+        for q, master in queries:
+            try:
+                r.publish(REDIS_ML_TX, q)
+                log(f"source query -> 0x{master:02x} (as link "
+                    f"0x{link_addr:02x}), attempt {i + 1}/{attempts}")
+            except redis.exceptions.RedisError:
+                pass
+            stop.wait(0.3)        # small gap between the two masters
         stop.wait(interval)
 
 

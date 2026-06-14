@@ -313,6 +313,22 @@ def decode_request_local_source(t: Telegram) -> List[Tuple[str, str]]:
     return out
 
 
+def decode_request_distributed_source(t: Telegram) -> List[Tuple[str, str]]:
+    """0x08 REQUEST_DISTRIBUTED_SOURCE -- "what source is being distributed
+    on the link?" Sent by a link-room device (and by us, the state-tracker
+    startup query) as a REQUEST; the Audio Master answers a link device
+    with a RESPONSE (pl_len>=5) carrying the distributed source byte at
+    raw[13]. The Video Master answers pl_len=0 (a bare ack, no source).
+    The CONFIG (0x5e) broadcast form is a device's periodic presence ping.
+    """
+    if t.payload_len >= 5 and _need(t, 14):
+        return [("SOURCE",
+                 f"0x{t.raw[13]:02x} {lookup(ml_selectedsourcedict, t.raw[13])}")]
+    if t.telegram_type == 0x14:
+        return [("INFO", "ack (no source reported)")]
+    return [("INFO", "query / presence ping")]
+
+
 def decode_distribution_request(t: Telegram) -> List[Tuple[str, str]]:
     """0x6C DISTRIBUTION_REQUEST -- bus arbitration / source distribution
     handshake. Just dump payload for now; subtype semantics aren't fully
@@ -382,6 +398,7 @@ def decode_virtual_beo4(t: Telegram) -> List[Tuple[str, str]]:
 
 PAYLOAD_DECODERS: Dict[int, Tuple[str, DecoderFn]] = {
     0x04: ("master present",           decode_master_present),
+    0x08: ("request distributed src",  decode_request_distributed_source),
     0x06: ("display source",           decode_display_source),
     0x0B: ("extended source info",     decode_extended_source_info),
     0x0D: ("beo4 command",             decode_beo4_command),

@@ -61,13 +61,16 @@ bridge did).
 **Startup source query**: the active source's STATUS_INFO is only
 broadcast spontaneously, so right after the daemon starts `state:ml`
 would be `Unknown` until the next broadcast. To fill it immediately the
-tracker emulates a link-room speaker asking the AM what it's
-distributing — `REQUEST_DISTRIBUTED_SOURCE` sent `FROM` a link address
-(default `0x06`) `TO` the AM. The AM answers a link device (not the
-master) with the source byte, and this is **non-disruptive** — it's the
-normal link-join query; playback keeps going. The query fires a few times
-at startup and stops as soon as a source is known. In practice `state:ml`
-is populated within ~1 s of start.
+tracker emulates a link-room speaker asking **both masters** what
+they're distributing — `REQUEST_DISTRIBUTED_SOURCE` sent `FROM` a link
+address (default `0x06`) `TO` the AM (`0xC1`) and the VM (`0xC0`). A
+master answers a link device (not the other master) with the source
+byte, and this is **non-disruptive** — it's the normal link-join query;
+playback keeps going. On a typical AM+VM system the AM returns the audio
+source at the reply's `raw[13]`; the VM returns a bare ack here, but it's
+queried too so the daemon also works in VM-led / AM-absent topologies.
+The query fires a few times at startup and stops as soon as a source is
+known. In practice `state:ml` is populated within ~1 s of start.
 
 This is the only thing the tracker transmits. Flags:
 
