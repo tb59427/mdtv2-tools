@@ -98,7 +98,7 @@ broadcast spontaneously, so right after the daemon starts `state:ml`
 would be `Unknown` until the next broadcast. To fill it immediately the
 tracker emulates a link-room speaker asking **both masters** what
 they're distributing — `REQUEST_DISTRIBUTED_SOURCE` sent `FROM` a link
-address (default `0x06`) `TO` the AM (`0xC1`) and the VM (`0xC0`). A
+address (default `0x7f`) `TO` the AM (`0xC1`) and the VM (`0xC0`). A
 master answers a link device (not the other master) with the source
 byte, and this is **non-disruptive** — it's the normal link-join query;
 playback keeps going. On a typical AM+VM system the AM returns the audio
@@ -106,6 +106,16 @@ source at the reply's `raw[13]`; the VM returns a bare ack here, but it's
 queried too so the daemon also works in VM-led / AM-absent topologies.
 The query fires a few times at startup and stops as soon as a source is
 known.
+
+**The query-addr is verified free first.** Spoofing an address a real
+device already occupies is the subtle hazard here, and you can't detect
+it with the query itself — a device sitting at the query-addr stays
+*silent* to a telegram that appears to come from its own address. So at
+startup the tracker `MASTER_PRESENT`-probes the chosen address (to which a
+real device *does* answer); if occupied it falls back through
+`0x7f, 0x7e, … 0x78` to the first free one, and if all are taken it runs
+purely passive. The default `0x7f` is the top of the link range, where
+real link rooms are least likely to be assigned.
 
 The `0x08` reply gives the **source** but not the track. To also fetch
 the **track/channel**, once the source is known the tracker sends a
@@ -118,7 +128,8 @@ the listen loop parses. In practice `state:ml` has the source within
 These are the only telegrams the tracker transmits. Flags:
 
 ```
---query-addr 0x06   link-room address to emulate (default 0x06)
+--query-addr 0x7f   link-room address to emulate (default 0x7f; verified
+                    free at startup, auto-falls-back if occupied)
 --no-query          disable the query entirely (purely passive)
 --no-goto           do the source query but skip the GOTO-refresh: keeps
                     it strictly read-only (no phantom link-join), at the
@@ -130,11 +141,11 @@ These are the only telegrams the tracker transmits. Flags:
                     raise it (e.g. 2) for a more thorough scan on noisy buses
 ```
 
-Use `--no-query` (or a free `--query-addr`) if a real link-room speaker
-occupies `0x06`. The GOTO-refresh registers the query address as
-momentarily "joined" in the AM's bookkeeping (benign — no audio is
-drawn, the source is already playing); `--no-goto` avoids even that if
-you want the query to be purely a read.
+The address is auto-verified (above), so you normally don't need to touch
+it; use `--no-query` to disable the query entirely. The GOTO-refresh
+registers the query address as momentarily "joined" in the AM's
+bookkeeping (benign — no audio is drawn, the source is already playing);
+`--no-goto` avoids even that if you want the query to be purely a read.
 
 ### `state:ml:devices` — device discovery
 

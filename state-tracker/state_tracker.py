@@ -131,7 +131,15 @@ ADDR_VM             = 0xC0
 #   - VM (0xC0) answers pl_len=0 (a bare ack, no source) on this system,
 #     but we query it too so the daemon also works in VM-led / AM-absent
 #     topologies where the VM may carry the answer.
-DEFAULT_QUERY_ADDR  = 0x06
+# Default to the TOP of the link-address range: link rooms are normally
+# assigned low addresses, so 0x7f is the least likely to collide with a real
+# device. Whatever is configured, _select_query_addr verifies it's free at
+# startup (a real device there can't be detected by the query itself -- it
+# stays silent to a telegram from its own address -- so we MASTER_PRESENT it).
+DEFAULT_QUERY_ADDR  = 0x7F
+# Fall-back addresses (descending from the top of the link range) tried in
+# order if the configured query-addr turns out to be occupied.
+QUERY_ADDR_CANDIDATES = [0x7F, 0x7E, 0x7D, 0x7C, 0x7B, 0x7A, 0x79, 0x78]
 QUERY_MASTERS       = (ADDR_AM, ADDR_VM)
 
 # Source-byte -> which master's domain it belongs to. ML has two
@@ -800,6 +808,76 @@ def _publish(r: "redis.StrictRedis", bus: str, blob: dict) -> None:
     r.publish(EVENT_CHAN[bus], s)
 
 
+def _addr_occupied(r: "redis.StrictRedis", stop: threading.Event,
+                   addr: int, probes: int = 6, gap: float = 0.15) -> bool:
+    """True if a real device sits at `addr`, by MASTER_PRESENT-probing it.
+
+    This is the ONLY reliable occupancy test for an address we want to spoof:
+    a device at `addr` will NOT answer the source query (that telegram claims
+    to come FROM `addr`, i.e. from the device itself), but it DOES answer a
+    MASTER_PRESENT request addressed TO it. Empty addresses stay silent (no
+    false positives), so any pong means occupied. ~6 probes make a real
+    device's absence-of-pong negligible (~0.2^6)."""
+    prober = ADDR_AM if addr == ADDR_VM else ADDR_VM
+    probe = _build_mp_probe(addr, prober)
+    ps = r.pubsub()
+    try:
+        ps.subscribe(REDIS_ML_RX)
+        stop.wait(0.2)                       # let the subscribe land
+        ps.get_message(timeout=0.1)          # drain the subscribe confirmation
+        for _ in range(probes):
+            if stop.is_set():
+                break
+            try:
+                r.publish(REDIS_ML_TX, probe)
+            except redis.exceptions.RedisError:
+                pass
+            # listen for a pong FROM addr during the gap
+            m = ps.get_message(timeout=gap, ignore_subscribe_messages=True)
+            while m is not None:
+                data = m.get("data")
+                if isinstance(data, bytes):
+                    data = data.decode("utf-8", "replace")
+                try:
+                    raw = bytes.fromhex(data.strip())
+                except (ValueError, AttributeError):
+                    raw = b""
+                if len(raw) > 1 and raw[1] == addr:
+                    return True              # it answered -> occupied
+                m = ps.get_message(timeout=0.01, ignore_subscribe_messages=True)
+    finally:
+        try:
+            ps.close()
+        except Exception:
+            pass
+    return False
+
+
+def _select_query_addr(r: "redis.StrictRedis", stop: threading.Event,
+                       preferred: int) -> Optional[int]:
+    """Return a free address to emulate for the source query: the configured
+    one if it's free, else the first free fall-back candidate. None if every
+    candidate is occupied (caller then runs purely passive)."""
+    candidates = [preferred] + [a for a in QUERY_ADDR_CANDIDATES
+                                if a != preferred]
+    for addr in candidates:
+        if stop.is_set():
+            return None
+        if _addr_occupied(r, stop, addr):
+            log(f"query-addr 0x{addr:02x} is occupied by a real device "
+                f"-- not spoofing it")
+            continue
+        if addr != preferred:
+            log(f"query-addr: 0x{preferred:02x} was occupied; using free "
+                f"0x{addr:02x} instead")
+        else:
+            log(f"query-addr 0x{addr:02x} verified free")
+        return addr
+    log("no free query-addr found among candidates -- source query disabled "
+        "(running passive)")
+    return None
+
+
 def _startup_query(r: "redis.StrictRedis", ml: "MLState",
                    stop: threading.Event, link_addr: int,
                    do_goto: bool = True,
@@ -815,6 +893,14 @@ def _startup_query(r: "redis.StrictRedis", ml: "MLState",
     non-disruptive, and it makes the AM broadcast a full STATUS_INFO
     with CH_TRACK which the listen loop then parses.
     """
+    # Verify the address we're about to emulate isn't a real device first
+    # (a real device there stays silent to the query, so we must probe it).
+    link_addr = _select_query_addr(r, stop, link_addr)
+    if link_addr is None:
+        return
+    if stop.is_set():
+        return
+
     # The query/GOTO concern the audio path, so we track the am slot.
     def _wait_source(timeout: float) -> None:
         # Poll in small steps so we proceed the instant the reply lands.
@@ -991,8 +1077,11 @@ def main() -> int:
     ap.add_argument("--redis-port", type=int, default=6379)
     ap.add_argument("--query-addr", default=hex(DEFAULT_QUERY_ADDR),
                     help="link-room address to emulate for the startup "
-                         "source query (default 0x06, as captured). Must be "
-                         "a link device the AM will answer -- NOT a master.")
+                         "source query (default 0x7f, top of the link range "
+                         "to avoid real devices). Verified free at startup; "
+                         "if occupied, a free fall-back is chosen "
+                         "automatically. Must be a link address -- NOT a "
+                         "master.")
     ap.add_argument("--no-query", action="store_true",
                     help="disable the startup source query (purely passive; "
                          "use this if a real link speaker occupies the query "
