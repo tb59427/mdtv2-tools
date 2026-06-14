@@ -80,6 +80,12 @@ STATE_KEY   = {"ml": "state:ml",    "dl80": "state:dl80",  "dl86": "state:dl86"}
 EVENT_CHAN  = {"ml": "link:ml:state", "dl80": "link:dl80:state",
                "dl86": "link:dl86:state"}
 
+# Device-discovery interface.
+STATE_DEVICES_KEY = "state:ml:devices"   # GET -> the device inventory
+EVENT_DEVICES_CH  = "link:ml:devices"    # PUBLISHed when the inventory changes
+DISCOVER_CH       = "link:ml:discover"   # PUBLISH (""=default range, "full"=
+                                         # whole space) to trigger an MP sweep
+
 # (channel, bus, origin)
 CHANNELS = [
     (REDIS_ML_RX,   "ml",   "rx"),
@@ -100,9 +106,11 @@ PT_TRACK_INFO_LONG  = 0x82
 PT_TRACK_INFO       = 0x44      # TRACK_INFO; kind 0x05 = CURRENT_SOURCE
 PT_GOTO_SOURCE      = 0x45
 PT_REQ_DIST_SOURCE  = 0x08      # REQUEST_DISTRIBUTED_SOURCE
+PT_MASTER_PRESENT   = 0x04      # presence ping (REQUEST) / pong (RESPONSE)
 PT_STANDBY          = 0x10
 PT_RELEASE          = 0x11
 PT_VIRTUAL_BEO4     = 0x20      # MLGW_REMOTE_BEO4 (virtual keypress)
+TT_CONFIG           = 0x5E      # device self-announce telegram type
 TT_RESPONSE         = 0x14
 TT_REQUEST          = 0x0B
 KEY_STANDBY         = 0x0C      # Beo4 STANDBY
@@ -616,6 +624,160 @@ class DL86State:
 
 
 # ============================================================================
+# device discovery
+# ============================================================================
+
+# MASTER_PRESENT pong payload byte 1 (raw[10]) is a device class. Observed on
+# a live bus: the AM (0xc1) answers 0x01, the VM (0xc0) and other masters
+# answer 0x02, a link node (0x06) answers 0x08.
+DEVICE_CLASS_NAMES = {0x01: "audio master", 0x02: "video master",
+                      0x08: "link"}
+# Fixed, well-known addresses get a role label; everything else is a node.
+KNOWN_ROLES = {0xC0: "VM", 0xC1: "AM", 0xC2: "SC", 0x02: "SC-aux", 0xF0: "MLGW"}
+BROADCAST_ADDRS = {0x00, 0x80, 0x81, 0x82, 0x83, 0xFF}
+
+# Sweep: low device range + the high addresses we know carry devices.
+# The AM (0xC1) is intentionally not probed -- it doesn't pong MP; it's
+# detected via the 0x08 source query / its own broadcasts instead.
+SWEEP_LOW_RANGE = range(0x01, 0x80)          # 0x01..0x7f
+SWEEP_KNOWN_HIGH = [0xC0, 0xC2, 0xF0]        # VM, SC, MLGW
+SWEEP_GAP_S = 0.04                           # pace between probes (~bus-safe)
+SWEEP_PASSES = 2                             # MP pong is ~80%/try; 2 passes
+DEVICE_STALE_S = 300                         # "present" = seen within 5 min
+
+
+def _build_mp_probe(addr: int, prober: int) -> str:
+    """MASTER_PRESENT request ('present?') to `addr`, FROM a master."""
+    return bytes([addr, prober, 0x01, TT_REQUEST, 0x00, 0x00, 0x00,
+                  PT_MASTER_PRESENT, 0x03, 0x04, 0x02, 0x01]).hex()
+
+
+class DeviceInventory:
+    """Passive + active inventory of ML bus addresses. Fed from every
+    RECEIVED telegram (never our own TX, so spoofed-FROM probes can't
+    create phantom devices). An MP pong's class byte and a CONFIG
+    self-announce's device-id enrich the entry."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._devs: dict = {}     # addr -> {first_seen,last_seen,count,class,device_id}
+        self._rev = 0             # bumps only on a STRUCTURAL change
+        self._published_rev = -1  # last rev handed to _publish_devices
+
+    def observe(self, raw: bytes) -> None:
+        try:
+            if len(raw) < 8:
+                return
+            frm = raw[1]
+            if frm in BROADCAST_ADDRS:
+                return
+            ttype = raw[3]
+            pt = raw[7]
+            klass = None
+            dev_id = None
+            if pt == PT_MASTER_PRESENT and ttype == TT_RESPONSE and len(raw) > 10:
+                klass = raw[10]                       # pong device class
+            if ttype == TT_CONFIG and pt == PT_REQ_DIST_SOURCE and len(raw) >= 14:
+                dev_id = raw[11:14].hex()             # CONFIG "01 <addr> <id3>"
+            now = _now_iso()
+            with self._lock:
+                d = self._devs.get(frm)
+                if d is None:
+                    d = {"first_seen": now, "count": 0,
+                         "class": None, "device_id": None}
+                    self._devs[frm] = d
+                    self._rev += 1                    # new address appeared
+                d["last_seen"] = now
+                d["count"] += 1
+                if klass is not None and d["class"] != klass:
+                    d["class"] = klass
+                    self._rev += 1
+                if dev_id is not None and d["device_id"] != dev_id:
+                    d["device_id"] = dev_id
+                    self._rev += 1
+        except Exception:
+            pass
+
+    def take_dirty(self) -> bool:
+        """True (once) if a structural change happened since last publish."""
+        with self._lock:
+            if self._rev != self._published_rev:
+                self._published_rev = self._rev
+                return True
+            return False
+
+    def as_blob(self) -> dict:
+        now = datetime.datetime.now()
+        devices = {}
+        present = 0
+        with self._lock:
+            for addr, d in sorted(self._devs.items()):
+                try:
+                    last = datetime.datetime.fromisoformat(d["last_seen"])
+                    is_present = (now - last).total_seconds() <= DEVICE_STALE_S
+                except Exception:
+                    is_present = False
+                if is_present:
+                    present += 1
+                devices[f"0x{addr:02x}"] = {
+                    "role": KNOWN_ROLES.get(addr),
+                    "class": (DEVICE_CLASS_NAMES.get(d["class"])
+                              if d["class"] is not None else None),
+                    "class_byte": _hexb(d["class"]),
+                    "device_id": d["device_id"],
+                    "present": is_present,
+                    "count": d["count"],
+                    "first_seen": d["first_seen"],
+                    "last_seen": d["last_seen"],
+                }
+        return {"devices": devices, "present_count": present,
+                "updated": _now_iso()}
+
+
+def _publish_devices(r: "redis.StrictRedis", inv: "DeviceInventory",
+                     force: bool = False) -> None:
+    """Publish the inventory only when its structure changed (or forced),
+    so a steady stream of telegrams doesn't re-fire the key every frame."""
+    if not force and not inv.take_dirty():
+        return
+    inv.take_dirty()                 # consume the flag on a forced publish too
+    s = json.dumps(inv.as_blob())
+    r.set(STATE_DEVICES_KEY, s)
+    r.publish(EVENT_DEVICES_CH, s)
+
+
+def _run_sweep(r: "redis.StrictRedis", inv: "DeviceInventory",
+               stop: threading.Event, full: bool = False) -> None:
+    """Fire MASTER_PRESENT probes across the address range; pongs are
+    captured by the listen loop into the inventory. Then publish the
+    inventory. Probes spoof FROM a master (the device pongs to a
+    master); we never probe the AM's own address."""
+    addrs = (list(range(0x01, 0xFF)) if full
+             else list(SWEEP_LOW_RANGE) + SWEEP_KNOWN_HIGH)
+    log(f"discovery sweep: {len(addrs)} addrs x{SWEEP_PASSES} "
+        f"({'full' if full else 'default'} range)")
+    for _ in range(SWEEP_PASSES):
+        for addr in addrs:
+            if stop.is_set():
+                return
+            if addr in BROADCAST_ADDRS or addr == ADDR_AM:
+                continue
+            prober = ADDR_AM if addr == ADDR_VM else ADDR_VM
+            try:
+                r.publish(REDIS_ML_TX, _build_mp_probe(addr, prober))
+            except redis.exceptions.RedisError:
+                pass
+            stop.wait(SWEEP_GAP_S)
+    stop.wait(0.5)                       # let the last pongs land
+    try:
+        _publish_devices(r, inv, force=True)
+    except redis.exceptions.RedisError:
+        pass
+    log(f"discovery sweep done: {inv.as_blob()['present_count']} "
+        f"device(s) present")
+
+
+# ============================================================================
 # listen loop
 # ============================================================================
 
@@ -680,11 +842,12 @@ def _startup_query(r: "redis.StrictRedis", ml: "MLState",
 
 def listen(redis_host: str, redis_port: int, stop: threading.Event,
            query_addr: Optional[int] = DEFAULT_QUERY_ADDR,
-           do_goto: bool = True) -> None:
+           do_goto: bool = True, discover: bool = True) -> None:
     r = redis.StrictRedis(host=redis_host, port=redis_port, db=0,
                           socket_keepalive=True)
     ml, dl80, dl86 = MLState(), DL80State(), DL86State()
     trackers = {"ml": ml, "dl80": dl80, "dl86": dl86}
+    inv = DeviceInventory()
 
     # Seed all three keys so consumers always have something to GET.
     for bus, t in trackers.items():
@@ -692,7 +855,13 @@ def listen(redis_host: str, redis_port: int, stop: threading.Event,
             _publish(r, bus, t.as_blob())
         except redis.exceptions.RedisError:
             pass
-    log(f"state tracker up; keys: {', '.join(STATE_KEY.values())}")
+    if discover:
+        try:
+            _publish_devices(r, inv)
+        except redis.exceptions.RedisError:
+            pass
+    log(f"state tracker up; keys: {', '.join(STATE_KEY.values())}"
+        + (f", {STATE_DEVICES_KEY}" if discover else ""))
 
     # Kick off the non-disruptive source query (unless disabled). Runs in
     # a daemon thread so the listen loop is already receiving when the
@@ -702,6 +871,13 @@ def listen(redis_host: str, redis_port: int, stop: threading.Event,
             target=_startup_query, args=(r, ml, stop, query_addr, do_goto),
             name="startup-query", daemon=True).start()
 
+    # One discovery sweep at startup so state:ml:devices is populated without
+    # waiting for a manual trigger. On-demand sweeps come via DISCOVER_CH.
+    if discover:
+        threading.Thread(
+            target=_run_sweep, args=(r, inv, stop),
+            kwargs={"full": False}, name="startup-sweep", daemon=True).start()
+
     pubsub: Optional[redis.client.PubSub] = None
     try:
         while not stop.is_set():
@@ -709,6 +885,8 @@ def listen(redis_host: str, redis_port: int, stop: threading.Event,
                 if pubsub is None:
                     pubsub = r.pubsub()
                     pubsub.subscribe(*[ch for ch, _, _ in CHANNELS])
+                    if discover:
+                        pubsub.subscribe(DISCOVER_CH)
                 m = pubsub.get_message(timeout=0.5,
                                        ignore_subscribe_messages=True)
                 if m is None:
@@ -716,14 +894,25 @@ def listen(redis_host: str, redis_port: int, stop: threading.Event,
                 ch = m.get("channel")
                 if isinstance(ch, bytes):
                     ch = ch.decode("utf-8", errors="replace")
-                bus, origin = next(((b, o) for c, b, o in CHANNELS if c == ch),
-                                   (None, None))
-                if bus is None:
-                    continue
+
                 data = m.get("data")
                 if isinstance(data, bytes):
                     data = data.decode("utf-8", errors="replace")
                 data = data.strip()
+
+                # Discovery trigger: spawn a sweep, don't treat as a telegram.
+                if discover and ch == DISCOVER_CH:
+                    full = data.lower() == "full"
+                    threading.Thread(
+                        target=_run_sweep, args=(r, inv, stop),
+                        kwargs={"full": full}, name="sweep",
+                        daemon=True).start()
+                    continue
+
+                bus, origin = next(((b, o) for c, b, o in CHANNELS if c == ch),
+                                   (None, None))
+                if bus is None:
+                    continue
 
                 changed = False
                 if bus == "ml":
@@ -731,6 +920,12 @@ def listen(redis_host: str, redis_port: int, stop: threading.Event,
                         raw = bytes.fromhex(data)
                     except ValueError:
                         continue
+                    # Inventory is fed from RECEIVED telegrams only -- our own
+                    # MP probes spoof FROM a master, so counting TX would
+                    # invent phantom masters.
+                    if discover and origin == "rx":
+                        inv.observe(raw)
+                        _publish_devices(r, inv)
                     changed = ml.update(raw, origin)
                 elif bus == "dl80":
                     try:
@@ -792,6 +987,12 @@ def main() -> int:
                          "track (keeps the query read-only: source only, no "
                          "phantom link-join). Track then comes from the next "
                          "spontaneous broadcast.")
+    ap.add_argument("--no-discover", action="store_true",
+                    help="disable device discovery: no startup MASTER_PRESENT "
+                         "sweep, no state:ml:devices key, ignore the "
+                         f"{DISCOVER_CH} trigger. The inventory is built by "
+                         "actively probing the bus, so this keeps the daemon "
+                         "strictly passive on the discovery front.")
     args = ap.parse_args()
 
     query_addr = None
@@ -807,7 +1008,7 @@ def main() -> int:
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
 
     listen(args.redis_host, args.redis_port, stop, query_addr=query_addr,
-           do_goto=not args.no_goto)
+           do_goto=not args.no_goto, discover=not args.no_discover)
     return 0
 
 

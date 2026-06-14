@@ -14,6 +14,10 @@ is a background service — `install.sh` enables `mdt-state.service`.
 | `state:ml`   | `link:ml:state`   | MasterLink |
 | `state:dl80` | `link:dl80:state` | Datalink '80 (Beogram / Tape) |
 | `state:dl86` | `link:dl86:state` | Datalink '86 (integrated music system) |
+| `state:ml:devices` | `link:ml:devices` | MasterLink device inventory (see below) |
+
+There is also one **input** channel: `PUBLISH link:ml:discover ''` triggers
+an on-demand device sweep (payload `full` widens the scan — see below).
 
 Each key holds a JSON blob; the matching channel publishes the same blob
 whenever it changes (repeated identical status frames do **not** re-fire).
@@ -119,6 +123,8 @@ These are the only telegrams the tracker transmits. Flags:
 --no-goto           do the source query but skip the GOTO-refresh: keeps
                     it strictly read-only (no phantom link-join), at the
                     cost of no track until the next spontaneous broadcast
+--no-discover       disable device discovery: no startup sweep, no
+                    state:ml:devices key, ignore link:ml:discover
 ```
 
 Use `--no-query` (or a free `--query-addr`) if a real link-room speaker
@@ -126,6 +132,66 @@ occupies `0x06`. The GOTO-refresh registers the query address as
 momentarily "joined" in the AM's bookkeeping (benign — no audio is
 drawn, the source is already playing); `--no-goto` avoids even that if
 you want the query to be purely a read.
+
+### `state:ml:devices` — device discovery
+
+A map of which addresses are live on the ML bus, how many nodes there are,
+and what kind each is. Updated by an active **MASTER_PRESENT** sweep plus
+passive observation of normal traffic.
+
+```json
+{
+  "devices": {
+    "0x06": { "role": null,  "class": "link",         "class_byte": "0x08",
+              "device_id": null, "present": true, "count": 3,
+              "first_seen": "...", "last_seen": "..." },
+    "0x6e": { "role": null,  "class": "video master", "class_byte": "0x02", ... },
+    "0xc0": { "role": "VM",  "class": "video master", "class_byte": "0x02", ... },
+    "0xc1": { "role": "AM",  "class": "audio master", "class_byte": "0x01", ... }
+  },
+  "present_count": 4,
+  "updated": "..."
+}
+```
+
+Per address: `role` is a label for the fixed protocol addresses
+(`0xc0`→VM, `0xc1`→AM, `0xc2`→SC, `0x02`→SC-aux, `0xf0`→MLGW), `null` for
+everything else (link nodes get dynamic addresses, so we don't guess a
+name). `class` comes from the MASTER_PRESENT reply's class byte —
+observed live as `0x01` audio master, `0x02` video master, `0x08` link
+node — with the raw byte kept in `class_byte`. `device_id` is filled when
+a device self-announces with a `CONFIG` telegram. `present` is true if the
+address was seen within the last 5 minutes; `present_count` is how many
+are currently present. `count`/`first_seen`/`last_seen` are bookkeeping.
+
+**How it works.** ML has a presence ping/pong: a `MASTER_PRESENT` request
+sent `TO` an address makes a device at that address answer with a
+`MASTER_PRESENT` response carrying its class byte. The tracker sweeps the
+**low device range** (`0x01`–`0x7f`) plus the **known high addresses**
+(`0xc0` VM, `0xc2` SC, `0xf0` MLGW), two passes (a pong lands ~80 % of the
+time, so a second pass fills the gaps), pacing one probe every ~40 ms. The
+AM (`0xc1`) is never probed — it isn't pinged that way; it's picked up from
+its own replies and broadcasts instead. Probes are sent **FROM a master**
+(devices pong to a master), so the inventory is fed **only from received
+telegrams** — our own probes spoof a master's `FROM`, and counting those
+would invent phantoms.
+
+A sweep runs **once at startup** and **on demand**:
+
+```sh
+redis-cli PUBLISH link:ml:discover ''       # default range (~11 s)
+redis-cli PUBLISH link:ml:discover full     # whole 0x01..0xfe space (~slow)
+redis-cli GET state:ml:devices              # read the result
+redis-cli SUBSCRIBE link:ml:devices         # or watch it change
+```
+
+The sweep is **non-disruptive** — MASTER_PRESENT is a presence query, not
+a source command, so it doesn't interrupt playback. Between sweeps the
+inventory keeps refreshing passively: every device that sends *any*
+telegram is timestamped, so `present`/`last_seen` stay current and the key
+re-publishes the moment a genuinely new address appears. Disable the whole
+mechanism (no startup sweep, no `state:ml:devices`, ignore the trigger)
+with `--no-discover`.
 
 ### `state:dl86`
 ```json
