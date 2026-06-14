@@ -1,0 +1,18 @@
+[Unit]
+Description=mdt v2 bus state tracker (publishes state:ml / state:dl80 / state:dl86)
+Documentation=https://labs.polyvection.com/mdt
+Wants=redis-server.service mdtv2-broker.service
+After=network.target redis-server.service mdtv2-broker.service
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=1s
+# Read-only consumer of redis channels; needs neither serial nor audio.
+User=mdt
+Group=mdt
+WorkingDirectory=/opt/mdt-tools/state-tracker
+ExecStart=/usr/bin/python3 -u /opt/mdt-tools/state-tracker/state_tracker.py
+
+[Install]
+WantedBy=multi-user.target

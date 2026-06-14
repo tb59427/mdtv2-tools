@@ -19,6 +19,7 @@ Receive and send any remote control messages or analog audio streams via MasterL
 | **CD capture (music system)** | Sample script to do a 60 s record from a CD source: triggers DL'86 CD on, configures ADC, records, encodes FLAC and sends standby. | `dl-scripts/dl86-system/` |
 | **MasterLink protocol debugger** | Pretty-prints every ML telegram on the bus, decoded (TO/FROM/PT/payload). Compact and verbose modes. | `ml-debug/` |
 | **Datalink protocol debugger** | Pretty-prints every DL'80 and DL'86 message, decoded (opcode names for DL'80; address/format/payload breakdown for DL'86 including status frames with volume/track/standby semantics). | `dl-debug/` |
+| **Bus state variables** | Daemon that keeps the current ML / DL'80 / DL'86 status (active source, transport, track, volume) in Redis keys `state:ml` / `state:dl80` / `state:dl86`, and publishes a change event on `link:<bus>:state`. Read with one `redis-cli GET`. | `state-tracker/` |
 | **One-line install** | `curl … bootstrap.sh \| sudo bash` on a fresh Pi OS Lite installs apt deps, patches `config.txt`, sets up systemd services, deploys all code, builds a hidden pymcuprog venv for flashing. | `bootstrap.sh`, `install.sh` |
 | **MCU updater** | `sudo flash.sh firmware-vX.Y.Z.hex` lets you update the microcontroller handling raw ML and DL communication | `mcu-firmware/flash.sh` |
 
@@ -40,7 +41,7 @@ Receive and send any remote control messages or analog audio streams via MasterL
                           mdtv2-broker          ─────► Redis pub/sub ◄──┘
                                                             │
                                                             ▼
-                                    ml-source-bridge  /  dl-debug  /  ml-debug
+                          ml-source-bridge / state-tracker / dl-debug / ml-debug
                                     (Python services + tools)
 ```
 
@@ -140,6 +141,7 @@ options and the complete Beo4 key name table.
 ├── ml-debug/
 ├── dl-debug/
 ├── dl-scripts/
+├── state-tracker/         # state:ml / state:dl80 / state:dl86 daemon
 ├── mcu-firmware/
 └── .pymcuprog-venv/        # hidden venv for the UPDI flasher
 ```

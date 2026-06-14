@@ -215,7 +215,7 @@ RSYNC_OPTS=(-a --delete
     --exclude 'config.toml'
     --exclude '.pymcuprog-venv'
 )
-for d in broker ml-source-bridge ml-debug mcu-firmware; do
+for d in broker ml-source-bridge ml-debug dl-debug state-tracker mcu-firmware; do
     rsync "${RSYNC_OPTS[@]}" "$SOURCE_DIR/$d/" "$INSTALL_ROOT/$d/"
 done
 chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_ROOT"
@@ -225,7 +225,8 @@ ok "code synced"
 # ---------- 6. systemd unit files -------------------------------------------
 note "systemd unit files"
 for src_unit in "$SOURCE_DIR/broker/mdtv2-broker.service" \
-                "$SOURCE_DIR/ml-source-bridge/ml-source-bridge.service"; do
+                "$SOURCE_DIR/ml-source-bridge/ml-source-bridge.service" \
+                "$SOURCE_DIR/state-tracker/mdt-state.service"; do
     name=$(basename "$src_unit")
     dst="/etc/systemd/system/$name"
     if cmp -s "$src_unit" "$dst" 2>/dev/null; then
@@ -290,7 +291,7 @@ fi
 
 # Enable + start (or restart) both services. Fresh install: enable+now.
 # Update install: restart to pick up new code.
-for svc in mdtv2-broker.service ml-source-bridge.service; do
+for svc in mdtv2-broker.service ml-source-bridge.service mdt-state.service; do
     if systemctl is-enabled --quiet "$svc" 2>/dev/null; then
         note "restarting $svc"
         systemctl restart "$svc"
@@ -304,8 +305,9 @@ done
 echo
 note "install complete"
 echo
-echo "  services: $(systemctl is-active mdtv2-broker.service 2>/dev/null) mdtv2-broker, $(systemctl is-active ml-source-bridge.service 2>/dev/null) ml-source-bridge"
-echo "  logs:     sudo journalctl -u mdtv2-broker.service -u ml-source-bridge.service -f"
+echo "  services: $(systemctl is-active mdtv2-broker.service 2>/dev/null) mdtv2-broker, $(systemctl is-active ml-source-bridge.service 2>/dev/null) ml-source-bridge, $(systemctl is-active mdt-state.service 2>/dev/null) mdt-state"
+echo "  logs:     sudo journalctl -u mdtv2-broker.service -u ml-source-bridge.service -u mdt-state.service -f"
+echo "  state:    redis-cli GET state:ml | state:dl80 | state:dl86"
 if (( NEED_CONFIG_EDIT )); then
     echo
     echo "  /etc/ml-source-bridge.toml was created with default values --"
