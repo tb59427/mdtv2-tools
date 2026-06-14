@@ -645,7 +645,7 @@ BROADCAST_ADDRS = {0x00, 0x80, 0x81, 0x82, 0x83, 0xFF}
 SWEEP_LOW_RANGE = range(0x01, 0x80)          # 0x01..0x7f
 SWEEP_KNOWN_HIGH = [0xC0, 0xC1, 0xC2, 0xF0]  # VM, AM, SC, MLGW
 SWEEP_GAP_S = 0.04                           # pace between probes (~bus-safe)
-SWEEP_PASSES = 2                             # MP pong is ~80%/try; 2 passes
+SWEEP_PASSES = 1                             # probes/addr/sweep; --sweep-passes
 DEVICE_STALE_S = 300                         # "present" = seen within 5 min
 
 
@@ -1021,9 +1021,10 @@ def main() -> int:
     ap.add_argument("--sweep-passes", type=int, default=SWEEP_PASSES,
                     help=f"how many times each address is probed per sweep "
                          f"(default {SWEEP_PASSES}). A single probe pongs "
-                         f"~80%% of the time, so 2 passes lower the miss rate "
-                         f"to ~4%%; set 1 for a single quick pass (less bus "
-                         f"traffic, higher chance of missing a device).")
+                         f"~80%% of the time, so the default single pass is "
+                         f"quick but may miss a present device (~20%%); raise "
+                         f"it (e.g. 2 -> ~4%% miss) to scan more thoroughly at "
+                         f"the cost of more bus traffic.")
     args = ap.parse_args()
 
     query_addr = None
