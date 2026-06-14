@@ -306,17 +306,6 @@ class _MasterState:
         self.origin = origin
         return (self.source, self.activity, self.track) != before
 
-    def set_idle(self, activity: int, origin: str) -> bool:
-        """Source-less standby/release: mark not-playing but keep the
-        last source (so you can still see what was playing). No-op if
-        this slot never had a source."""
-        if self.source is None:
-            return False
-        before = self.activity
-        self.activity = activity
-        self.origin = origin
-        return self.activity != before
-
     def as_blob(self) -> dict:
         return {
             "source": _hexb(self.source),
@@ -336,8 +325,16 @@ class MLState:
     """The ML view, split by master: am (audio) and vm (video). Each
     source-carrying telegram is routed to a slot by source category
     (SOURCE_KIND), so the two never clobber each other -- a video
-    STATUS_INFO can't overwrite the active audio source. Source-less
-    standby/release marks whatever was playing in each slot as idle."""
+    STATUS_INFO can't overwrite the active audio source.
+
+    Standby/release is only acted on when it NAMES a source (then it
+    idles that source's slot). A source-less standby is deliberately
+    ignored: it's ambiguous and does NOT imply audio stopped. E.g. when
+    the VM switches its own screen to a video source it sends a
+    source-less STANDDBY to the AM, but the AM keeps distributing the
+    audio source to other zones (a link room) -- idling `am` there would
+    be wrong. A real power-off instead sends per-source RELEASE
+    telegrams (which carry a source) and those idle the right slots."""
 
     def __init__(self) -> None:
         self.am = _MasterState()
@@ -351,11 +348,7 @@ class MLState:
         if src is not None and src in SOURCE_KIND:
             slot = self.am if SOURCE_KIND[src] == "am" else self.vm
             return slot.apply(d, origin)
-        if d.get("standby"):
-            c_am = self.am.set_idle(d["activity"], origin)
-            c_vm = self.vm.set_idle(d["activity"], origin)
-            return c_am or c_vm
-        return False
+        return False                    # source-less standby/etc: ignore
 
     def as_blob(self) -> dict:
         return {
