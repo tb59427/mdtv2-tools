@@ -189,6 +189,12 @@ ML_ACTIVITY_NAMES = {
     0xFF: "Blank Status",
 }
 
+# Activities that count as "actively in use" -- a slot keeps its source
+# while in one of these and is nulled otherwise (Stop/Standby/Unknown/
+# No-Media/Blank). FF/RW/Scan are included so seeking doesn't flicker the
+# source out and back.
+ACTIVE_ACTIVITIES = {0x02, 0x03, 0x04, 0x14, 0x15}  # Playing, FF, RW, ScanF/R
+
 
 def parse_ml(raw: bytes) -> Optional[dict]:
     """Extract {from, source, activity, track} from the telegram types that
@@ -354,8 +360,20 @@ class MLState:
         self.am = _MasterState()
         self.vm = _MasterState()
 
-    def _any_playing(self) -> bool:
-        return self.am.activity == 0x02 or self.vm.activity == 0x02
+    @staticmethod
+    def _apply_or_clear(slot: "_MasterState", d: dict, origin: str) -> bool:
+        """A slot shows a source only while it's actively in use. An
+        active-transport telegram (Playing/FF/RW/Scan) sets/updates the
+        slot; any inactive one (Stop/Standby/Unknown/No-Media) nulls it
+        -- but only when it concerns the source the slot is currently
+        showing, so a standby for some *other* source can't wipe what's
+        playing."""
+        if d.get("activity") in ACTIVE_ACTIVITIES:
+            return slot.apply(d, origin)
+        if slot.source is not None and slot.source == d.get("source"):
+            slot.clear()
+            return True
+        return False
 
     def update(self, raw: bytes, origin: str) -> bool:
         d = parse_ml(raw)
@@ -366,26 +384,17 @@ class MLState:
         if src is None or src not in SOURCE_KIND:
             return False                # source-less standby/etc: ignore
         if SOURCE_KIND[src] == "vm":
-            changed = self.vm.apply(d, origin)
-        else:
-            # Audio source -> am.
-            changed = self.am.apply(d, origin)
-            # If the Video Master itself reports an audio source, it isn't
-            # showing any video -> clear the video slot. This is how
-            # switching the VM back from a video source to an audio
-            # source (e.g. DTV -> CD, announced as GOTO_SOURCE c0->CD)
-            # nulls the stale video entry.
-            if frm == ADDR_VM and self.vm.source is not None:
-                self.vm.clear()
-                changed = True
-
-        # Fully-idle reset: once nothing is playing in either slot, null
-        # both so a powered-off / all-stopped system reads as a clean
-        # empty state instead of leaving stale "X Standby" entries.
-        if changed and not self._any_playing() \
-                and (self.am.source is not None or self.vm.source is not None):
-            self.am.clear()
+            return self._apply_or_clear(self.vm, d, origin)
+        # Audio source -> am.
+        changed = self._apply_or_clear(self.am, d, origin)
+        # If the Video Master itself reports an audio source, it isn't
+        # showing any video -> clear the video slot. This is how switching
+        # the VM back from a video source to an audio source (e.g.
+        # DTV -> CD, announced as GOTO_SOURCE c0->CD) nulls the stale
+        # video entry.
+        if frm == ADDR_VM and self.vm.source is not None:
             self.vm.clear()
+            changed = True
         return changed
 
     def as_blob(self) -> dict:

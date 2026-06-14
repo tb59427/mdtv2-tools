@@ -55,19 +55,21 @@ Tracked from `STATUS_INFO` (0x87), `TRACK_INFO_LONG` (0x82),
 `REQUEST_DISTRIBUTED_SOURCE` replies (0x08, source at the reply's
 `raw[13]` — rides the link-join handshake and the startup query below).
 
-**Off / standby**: a `STANDBY` (0x10) / `RELEASE` (0x11) telegram that
-**names a source** idles that source's slot (`activity` → Standby/Stop,
-`playing` → false). A power-off sends per-source RELEASEs, so each slot
-idles correctly. A **source-less** standby is deliberately ignored —
-it's ambiguous and doesn't imply audio stopped: when the VM switches its
-own screen to a video source it fires a source-less STANDBY at the AM,
-but the AM keeps distributing audio to other zones (e.g. a link room),
-so `am` must stay playing.
+**A slot only shows a source while it's actively in use.** As soon as a
+slot's source goes inactive (Stop / Standby / Unknown / No-Media), that
+slot is nulled — there's no "CD Standby" lingering. Active-transport
+states (Playing, Fast-Forward, Rewind, Scan) keep the slot, so seeking
+doesn't flicker the source out and back. A powered-off system therefore
+reads as both slots all-null.
 
-**Fully-idle reset**: once *neither* slot is playing, both are nulled —
-a powered-off / all-stopped system reads as a clean empty state rather
-than leaving stale `CD Standby` / `TV Standby` entries. (While at least
-one slot is still playing, the other's idle/standby entry is kept.)
+Off signals: a `STANDBY` (0x10) / `RELEASE` (0x11) that **names a
+source** nulls that source's slot — but only if it's the source the
+slot is currently showing, so a standby for some *other* source can't
+wipe what's playing. A **source-less** standby is ignored (ambiguous,
+and doesn't imply audio stopped: when the VM switches its screen to
+video it fires a source-less STANDBY at the AM while the AM keeps
+serving audio to other zones). The VM returning to an audio source
+nulls the `vm` (video) slot.
 
 **`vm` is best-effort.** The AM is queryable (the startup query/GOTO
 fills `am` proactively), but the VM answers the query with an empty ack,
