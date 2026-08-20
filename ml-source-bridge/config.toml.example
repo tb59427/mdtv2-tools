@@ -53,8 +53,13 @@ redis_port = 6379
 #   RADIO   -> 0x81   N.MUSIC -> 0x94   CD -> 0x92   N.RADIO -> 0x93
 #
 # Available providers:
-#   "airplay"  -- shairport-sync via D-Bus (one shairport instance shared
-#                  across all airplay sources)
+#   "airplay"    -- shairport-sync via D-Bus (one shairport instance shared
+#                   across all airplay sources)
+#   "turntable"  -- a DL'80 Beogram turntable, controlled over the Datalink
+#                   wire and looped ADC -> DAC into ML. Configure it in the
+#                   [turntable] section below. NOT a default for any source:
+#                   set provider = "turntable" on whichever source you want
+#                   to give up (N.RADIO 0xA1 is the usual choice).
 
 [[sources]]
 source_byte  = 0xA1            # N.RADIO
@@ -66,6 +71,107 @@ display_name = "N.RADIO"        # optional; up to 11 chars ASCII
 # source_byte  = 0x7A           # N.MUSIC
 # provider     = "mpd"
 # display_name = "N.MUSIC"
+
+# Turntable on N.RADIO instead of AirPlay -- replace the block above with:
+# [[sources]]
+# source_byte  = 0xA1           # N.RADIO
+# provider     = "turntable"
+# display_name = "PHONO"
+
+
+# ---- turntable provider (DL'80 Beogram as an ML source) --------------------
+# Only read when some [[sources]] entry sets provider = "turntable".
+#
+# What it does: ML transport keys become DL'80 opcodes on the Datalink
+# wire (play / stop / next / prev), and the turntable's analogue output is
+# looped from the HAT's ADC back out through its DAC onto ML. Selecting the
+# source on your Beo remote starts the record; Step Up / Step Down skip
+# tracks; leaving the source parks the arm.
+#
+# On a deck that reports DL'80 status (0xC3 playing / 0xCE stopped),
+# pressing PLAY on the turntable itself also wakes the ML system to this
+# source (when auto_wake = true). Not all decks do: a Beogram 5500 answers
+# only 0xFC/0xF1, which aren't state, so there it follows our commands only
+# -- hand-started records don't wake ML, and the source stays selected
+# after a side ends until you leave it.
+
+# [turntable]
+# ---- audio loopback ----
+# loopback        = true                     # false = control only, no audio
+# metadata_title  = "PHONO"                  # text shown on the B&O display
+#                                            # where a track title would go
+#                                            # ("" = leave it blank)
+# capture_device  = "hw:sndrpihifiberry,0"   # ADC (turntable in)
+# playback_device = "hw:sndrpihifiberry,0"   # DAC (out to ML)
+# sample_rate     = 48000
+# channels        = 2
+# format          = "S32_LE"                 # S32_LE or S16_LE
+# period_size     = 0                        # 0 = let ALSA choose; lower =
+#                                            # less latency, more xrun risk
+#
+# ---- ADC front end (PCM1862 over I2C) ----
+# IMPORTANT: the ADC comes up on VIN1, but the HAT's phono input is VIN4 --
+# leave adc_setup = true or you get a playing record and dead silence.
+# Needs i2c-tools and the i2c-dev module (install.sh sets both up).
+# adc_setup    = true       # false = don't touch the ADC at all
+# pga_db       = 0.0        # analogue gain, -12 .. +40 dB in 0.5 dB steps.
+#                           # 0 dB is correct for a LINE-level input -- i.e.
+#                           # a turntable with its own RIAA preamp, or a bare
+#                           # cartridge through an EXTERNAL phono preamp.
+#                           # That is the recommended hookup; keep 0 dB.
+#                           # Large values (~+36 dB) only make sense with the
+#                           # dev-only software-RIAA path below, and cost you
+#                           # noise and headroom.
+# i2c_bus      = 1
+# i2c_addr     = "0x4a"
+# adc_input_reg = 0x48      # 0x48 = VIN4 single-ended (the HAT's phono in)
+#
+# ---- software RIAA -- DEV / EXPERIMENTAL ONLY, POOR SOUND QUALITY ----
+#
+#   DO NOT use this to actually listen to records.
+#
+# It exists to characterise the ADC path and play with curves, nothing more.
+# Feeding a ~4 mV cartridge straight into a 3.3 V sigma-delta ADC and then
+# making up ~36 dB of gain gives you a thin, noisy signal with no headroom;
+# it cannot come close to a real phono stage.
+#
+# If your turntable has NO built-in RIAA preamp, use an EXTERNAL phono
+# preamp into a line input and leave riaa = false / pga_db = 0. If it has
+# one built in (most Beograms do), you are already at line level -- also
+# leave these off. Either way the correct answer for listening is an
+# analogue phono stage, not this.
+#
+# Uses numpy + scipy, which install.sh provisions for you.
+# riaa             = false
+# riaa_highpass_hz = 30.0   # subsonic / warp filter; 0 disables
+# riaa_gain_db     = 0.0    # fixed makeup gain (a live stream can't be
+#                           # peak-normalized the way a finished file is)
+#
+# ---- local controls on the deck ----
+# The deck's own PLAY / STANDBY buttons drive ML, not just the other way
+# round: it reports its state on DL'80, so pressing PLAY switches the ML
+# system to this source (needs auto_wake = true) and pressing STANDBY
+# releases the source and switches ML off.
+#
+# standby_ml_on_stop = true   # false = release the source but leave ML on
+#
+# Which status codes mean playing / stopped is deck-dependent. Defaults cover
+# the documented codes (0xC3 playing, 0xCE/0xC5/0xC8 stopped) PLUS what a
+# Beogram 5500 really emits: 0xFC on start and 0xF1 on stop (established by
+# pressing its buttons and watching the wire -- the spec names for those two
+# say something else entirely). Override if your deck differs:
+# status_playing = [0xC3, 0xFC]
+# status_stopped = [0xCE, 0xC5, 0xC8, 0xF1]
+
+# ---- DL'80 opcodes ----
+# Defaults are verified on a Beogram 5500 (dl-docs/dl80-beogram/). Override
+# per model. Note stop = 0xCB is Sys.Standby, which is BUS-WIDE: other DL'80
+# devices on the same wire also go to standby.
+# [turntable.opcodes]
+# play = 0xA9    # BG.Play
+# stop = 0xCB    # Sys.Standby
+# next = 0x95    # BG.ADV->
+# prev = 0xF3    # BG.<-Ret
 
 
 # ---- LIGHT-key home-automation hook ----------------------------------------

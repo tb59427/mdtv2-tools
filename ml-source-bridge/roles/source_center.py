@@ -34,7 +34,7 @@ from core.lock_manager import LockManager
 from core.telegram import (
     ADDR_ALL, ADDR_ALL_LINK, ADDR_AM, ADDR_SC, ADDR_SC_AUX, ADDR_VM,
     BEO4_KEY_FOR_SOURCE,
-    KEY_STEP_DOWN, KEY_STEP_UP,
+    KEY_STANDBY, KEY_STEP_DOWN, KEY_STEP_UP,
     PT_BEO4_KEY, PT_DISTRIBUTION_REQUEST, PT_LOCK_MANAGER,
     PT_MASTER_PRESENT, PT_RELEASE, PT_STANDBY,
     SRC_PC, TT_REQUEST, Telegram,
@@ -253,9 +253,15 @@ class SourceCenterRole(Role):
         # 2..6 with placeholders. The metadata pump replaces these as
         # soon as the provider reports real data.
         from providers.base import Metadata
-        self._push_metadata_set(ctx, provider, Metadata(
-            title="Connecting", artist="", album="", genre="",
-        ), final_display_source=True)
+        # Prefer whatever the provider can already tell us; fall back to a
+        # placeholder. This matters for providers whose metadata is CONSTANT
+        # (a turntable reports a fixed "PHONO"): the metadata pump only
+        # fires on change, so after the first claim it would never re-push
+        # and the display would be stuck on "Connecting".
+        md = provider.metadata()
+        if md is None:
+            md = Metadata(title="Connecting", artist="", album="", genre="")
+        self._push_metadata_set(ctx, provider, md, final_display_source=True)
 
         provider.play()
 
@@ -371,6 +377,17 @@ class SourceCenterRole(Role):
             log(f"[sc] stream stopped on 0x{provider.source_byte:02x} "
                 f"({provider.display_name!r}) -- broadcasting RELEASE")
             ctx.bus.send(B.release(frm=ADDR_SC))
+            # Some backends ARE the off switch: switching a turntable to
+            # standby means "I'm done listening", not "the track ended", so
+            # the whole system should go off rather than sit on a dead
+            # source. Opt-in per provider (AirPlay must NOT do this -- a
+            # paused stream is not a power-off).
+            if getattr(provider, "standby_ml_on_stop", False):
+                log(f"[sc] {provider.display_name!r} asks for system standby "
+                    f"-- sending Beo4 STANDBY")
+                ctx.bus.send(B.virtual_beo4(
+                    frm=ADDR_SC, to=ADDR_AM,
+                    source_byte=provider.source_byte, key=KEY_STANDBY))
             return
         if event == "metadata":
             md = provider.metadata()

@@ -28,7 +28,7 @@ Config file (TOML, see config.toml.example):
     role           = "sc" | "am"
     source_byte    = 0xA1     (or 0x7A, 0x8D, 0x6F, ...)
     display_name   = "N.RADIO" (optional)
-    provider       = "airplay"
+    provider       = "airplay" | "turntable"
     broadcast_clock= true
     auto_wake      = true
     redis_host     = "localhost"
@@ -60,6 +60,7 @@ from core.telegram import (
 from core.topology import Topology
 from providers.airplay import AirPlayProvider
 from providers.base import SourceProvider
+from providers.turntable import TurntableProvider
 from roles.audio_master import AudioMasterRole
 from roles.source_center import SourceCenterRole
 from roles.base import Role
@@ -146,11 +147,21 @@ def _resolve_sources(cfg: dict, args) -> list[dict]:
 
 # ----------------------------------------------------------------------------
 
-def make_provider(name: str, source_byte: int,
-                  display_name: str) -> SourceProvider:
+def make_provider(name: str, source_byte: int, display_name: str,
+                  *, cfg: Optional[dict] = None,
+                  redis_host: str = "localhost",
+                  redis_port: int = 6379) -> SourceProvider:
     if name == "airplay":
         return AirPlayProvider(source_byte=source_byte,
                                display_name=display_name)
+    if name == "turntable":
+        # Provider-specific settings live in their own [turntable] table
+        # (ALSA devices, RIAA, ADC gain, DL'80 opcode overrides).
+        return TurntableProvider(source_byte=source_byte,
+                                 display_name=display_name,
+                                 cfg=(cfg or {}).get("turntable") or {},
+                                 redis_host=redis_host,
+                                 redis_port=redis_port)
     raise SystemExit(f"unknown provider: {name!r}")
 
 
@@ -369,7 +380,9 @@ def main() -> int:
             raise SystemExit(
                 f"duplicate source_byte 0x{src:02x} in config -- "
                 f"each source byte may have only one provider")
-        providers[src] = make_provider(pname, src, display)
+        providers[src] = make_provider(
+            pname, src, display, cfg=cfg,
+            redis_host=redis_host, redis_port=redis_port)
 
     log(f"[main] role={role.name} addr=0x{role.own_address:02x}  "
         f"redis={redis_host}:{redis_port}  "

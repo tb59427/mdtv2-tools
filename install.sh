@@ -106,7 +106,19 @@ APT_PKGS=(
     python3-serial
     shairport-sync
     python3-venv          # for the hidden pymcuprog venv
+    alsa-utils            # arecord/aplay: dl-scripts captures + turntable loopback
+    i2c-tools             # i2cset: PCM1862 ADC input mux + PGA gain
+    python3-numpy         # software RIAA (turntable provider + phono capture)
+    python3-scipy         # ~72 MB, but RIAA is unusable without it
+    python3-soundfile     # dl-scripts phono capture reads/writes WAV
+    ffmpeg                # dl-scripts encode their captures to FLAC
 )
+# Note: python3-numpy / python3-scipy / python3-soundfile / ffmpeg are only
+# needed for the software-RIAA paths (the turntable provider's `riaa = true`
+# and dl-scripts' phono capture + FLAC encode). numpy+scipy alone are ~89 MB
+# and most setups never touch them, but they're installed anyway so those
+# paths work out of the box instead of failing at the moment you enable them.
+#
 # Note: `pinctrl` (used by mcu-firmware/flash.sh to toggle UART.SEL) is
 # a binary that ships pre-installed on Raspberry Pi OS; it isn't an
 # apt-installable package, so we don't try to install it here. The
@@ -237,6 +249,22 @@ for src_unit in "$SOURCE_DIR/broker/mdtv2-broker.service" \
         ok "installed $name"
     fi
 done
+
+# ---------- 6b. i2c-dev module (ADC register access) ------------------------
+# The HiFiBerry overlay creates the i2c bus, but userspace tools (i2cset,
+# used for the PCM1862 ADC input mux + PGA gain) need the i2c-dev char
+# driver, which isn't loaded by default -- without it /dev/i2c-1 is absent
+# and every i2cset silently fails. A modules-load.d drop-in fixes it with
+# no reboot needed.
+I2C_MODCONF=/etc/modules-load.d/mdt-i2c-dev.conf
+if [[ ! -f $I2C_MODCONF ]] || ! grep -q '^i2c-dev' "$I2C_MODCONF"; then
+    note "enabling i2c-dev (needed for ADC input select / PGA)"
+    echo "i2c-dev" > "$I2C_MODCONF"
+    modprobe i2c-dev 2>/dev/null || warn "modprobe i2c-dev failed"
+    ok "i2c-dev enabled"
+else
+    skip "i2c-dev already enabled"
+fi
 
 # ---------- 7. shairport-sync D-Bus policy ----------------------------------
 SRC_POLICY="$SOURCE_DIR/ml-source-bridge/shairport-sync-instance-policy.conf"

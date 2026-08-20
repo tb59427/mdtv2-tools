@@ -100,6 +100,7 @@ SRC_N_RADIO  = 0xA1
 
 
 # ---- Beo4 key codes we actually act on -------------------------------------
+KEY_STANDBY       = 0x0C   # STANDBY (system off)
 KEY_STEP_UP       = 0x1E   # NEXT
 KEY_STEP_DOWN     = 0x1F   # PREV
 KEY_REWIND        = 0x32
