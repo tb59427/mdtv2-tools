@@ -29,7 +29,23 @@ broadcast_clock = true
 # Auto-wake: when a provider's audio stream starts (e.g. AirPlay session
 # begins), inject a virtual Beo4 keypress so the AM/VM switches to that
 # source automatically.
+#
+# The wake is SKIPPED when the bus is already on our source -- i.e. you
+# picked the source on a remote and the stream only started afterwards.
+# Waking there would drag the wake target into a session it was never part
+# of (in a multi-room house the VM is the main-room TV, so the main room
+# switches itself on mid-listening).
 auto_wake = true
+
+# Where the auto-wake telegram is addressed:
+#   "vm"   video master (default) -- what a real B&O Source Center does
+#   "am"   audio master           -- for AM-only setups, or when you don't
+#                                   want the main-room TV coming on
+#   "off"  never wake             -- same as auto_wake = false
+#   0x06   any ML address         -- e.g. a single link node, so only that
+#                                   room comes up. UNVERIFIED: a link node
+#                                   is not a master and may ignore it.
+wake_target = "vm"
 
 
 # ---- redis broker -----------------------------------------------------------

@@ -92,6 +92,24 @@ Both are off by default. Note they only work as a pair: a bare cartridge
 needs the gain *and* the curve, so enabling one without the other gives
 either silence or a wrong tonal balance.
 
+## Auto-wake
+
+When a provider's stream starts, the SC injects a virtual Beo4 keypress so
+the system switches to that source. Two things bound it:
+
+* **It is skipped when the bus is already on our source.** The stream
+  starting is not itself a reason to change what the house is doing. If the
+  user selected the source on a remote and the stream only arrived
+  afterwards, waking would pull the wake target into a session it was never
+  part of -- in a multi-room house the VM is the main-room TV, so the main
+  room switches itself on while you are listening somewhere else. Known
+  state comes from our own grant bookkeeping, cross-checked against
+  `state:ml` from the state-tracker daemon so it survives a bridge restart
+  mid-session (optional -- absent key just falls back to our own view).
+* **`wake_target`** picks the address: `"vm"` (default, mirrors a real
+  Source Center), `"am"`, `"off"`, or any ML address such as `0x06` to aim
+  it at a single link node. Only the VM and AM forms are capture-verified.
+
 ## Configuration
 
 `/etc/ml-source-bridge.toml` -- copied from `config.toml.example` on first

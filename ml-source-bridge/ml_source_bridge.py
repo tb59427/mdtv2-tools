@@ -165,6 +165,31 @@ def make_provider(name: str, source_byte: int, display_name: str,
     raise SystemExit(f"unknown provider: {name!r}")
 
 
+def parse_wake_target(value: object) -> object:
+    """Normalise the `wake_target` setting.
+
+    Accepts "vm" | "am" | "off" (case-insensitive) or an ML address for
+    setups where the wake should go somewhere else entirely -- given as
+    an int (0x06) or a string ("0x06" / "6"). Returns "vm"/"am"/"off" or
+    an int address.
+    """
+    if value is None:
+        return "vm"
+    if isinstance(value, bool):                      # bool is an int; reject
+        raise SystemExit("config wake_target must be vm/am/off or an address")
+    if isinstance(value, int):
+        return value & 0xFF
+    text = str(value).strip().lower()
+    if text in ("vm", "am", "off"):
+        return text
+    try:
+        return int(text, 0) & 0xFF
+    except ValueError:
+        raise SystemExit(
+            f"config wake_target {value!r} is not 'vm', 'am', 'off' "
+            f"or an ML address like 0x06")
+
+
 def make_role(name: str) -> Role:
     if name == "am":
         return AudioMasterRole()
@@ -335,6 +360,7 @@ def main() -> int:
     redis_port  = _coalesce(args.redis_port,   cfg.get("redis_port"),   default=6379)
     do_clock = not args.no_clock and cfg.get("broadcast_clock", True)
     do_wake  = not args.no_wake  and cfg.get("auto_wake",       True)
+    wake_target = parse_wake_target(cfg.get("wake_target"))
 
     # Build the source list. Two forms supported:
     #   - config has [[sources]] array: each entry is { source_byte, provider, display_name? }
@@ -368,6 +394,7 @@ def main() -> int:
     bus = _DryRunBus(bus_real) if args.dry_run else bus_real
 
     role = make_role(role_name)
+    setattr(role, "wake_target", wake_target)
 
     # Build providers dict: source byte -> SourceProvider.
     providers: dict[int, SourceProvider] = {}
@@ -387,7 +414,9 @@ def main() -> int:
     log(f"[main] role={role.name} addr=0x{role.own_address:02x}  "
         f"redis={redis_host}:{redis_port}  "
         f"clock={'on' if do_clock else 'off'}  "
-        f"wake={'on' if do_wake else 'off'}  "
+        f"wake={'on' if do_wake else 'off'}"
+        + (f"->{wake_target if isinstance(wake_target, str) else hex(wake_target)}"
+           if do_wake else "") + "  "
         f"dry_run={args.dry_run}")
     for src, prov in providers.items():
         log(f"[main]   source 0x{src:02x}  provider={prov.__class__.__name__}"

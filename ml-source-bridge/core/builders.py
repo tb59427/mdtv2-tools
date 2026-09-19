@@ -209,6 +209,27 @@ def wake_via_am_spoof_vm(*, key: int) -> bytes:
     ])
 
 
+def wake_via_addr(*, to: int, key: int) -> bytes:
+    """Wake an ARBITRARY address via virtual_beo4.
+
+    Same byte-form as wake_via_vm() (FROM=AM-spoof, orig_src=0x47 PC,
+    0xff markers) with only the TO swapped -- for setups where neither
+    master is the right wake target, e.g. aiming the wake at a single
+    link node so only that room comes up.
+
+    UNVERIFIED: the VM and AM forms are backed by captures of real
+    hardware; this one is not. A link node is not a master and does not
+    orchestrate a source change, so it may simply ignore this.
+    """
+    return bytes([
+        to, ADDR_AM, 0x01, TT_COMMAND,
+        0x00, 0x47, 0x00,                       # src_dest, orig_src=PC, b6
+        PT_VIRTUAL_BEO4, 0x05,
+        0x02, 0x00, 0x01, 0xff, 0xff,           # 5-byte payload, ff markers
+        key,                                    # post-payload key
+    ])
+
+
 def wake_broadcast(*, key: int) -> bytes:
     """Broadcast wake (TO=ALL) when bus topology is unknown. Uses the same
     spoofed-AM / PC-marker layout as wake_via_vm() -- whichever master is
@@ -392,16 +413,22 @@ def am_track_info_long(*, to: int, source_byte: int) -> bytes:
 _SC = ADDR_SC
 
 
-def sc_distribution_grant(*, to: int) -> bytes:
+def sc_distribution_grant(*, to: int, source_byte: int) -> bytes:
     """Reply to a master's DISTRIBUTION_REQUEST (0x6C) granting the source.
 
     Reproduces the legacy SCtoAM_respNR byte sequence:
         c1 c2 01 14 00 a1 00 6c 01 08 01
-    (Header places the source byte 0xa1 at offset 5 = orig_src, NOT
-    offset 4 = src_dest; my first cut had this swapped.)
+    (Header places the source byte at offset 5 = orig_src, NOT offset
+    4 = src_dest.)
+
+    The legacy literal hard-coded orig_src = 0xa1 (N.RADIO) because that
+    was the only source it ever served. Answering a request for a
+    DIFFERENT source with 0xa1 claims we granted something the master
+    never asked for -- seen live: AM requested 0x7a N.MUSIC and we
+    replied `c1c2011400a1006c0108`. Echo the requested byte instead.
     """
     return header(to=to, frm=_SC, type_=TT_RESPONSE,
-                  src_dest=0x00, orig_src=0xa1, b6=0x00,
+                  src_dest=0x00, orig_src=source_byte, b6=0x00,
                   payload_type=PT_DISTRIBUTION_REQUEST,
                   payload=bytes([0x08]))
 
