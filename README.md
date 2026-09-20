@@ -1,3 +1,7 @@
+# TB version of mdtv2-tools
+This is a clone from Philip Voigt's great Masterlink Toolset MDTV2 (here's the gitlab repo: https://gitlab.com/masterdatatool/software/mdtv2-tools)
+I have started to experiment with a sendspin provider which this repo contains in addition to all of Philip's stuff. Still in experimental state.
+
 # mdtv2-tools
 
 Python tool-set for the MasterDataTool v2. A Raspberry Pi acessory board that interfaces vintage B&O devices like BeoSound 9000, BeoCenter 2, BeoLab 3500, BeoGram 7000, BeoCenter 9500, etc. and makes them compatible with the modern streaming world.
