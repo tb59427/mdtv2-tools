@@ -25,6 +25,7 @@ selection the user makes.
 """
 from __future__ import annotations
 
+import json
 import time
 
 from core import builders as B
@@ -40,6 +41,11 @@ from core.telegram import (
     SRC_PC, TT_REQUEST, Telegram,
 )
 from roles.base import Role
+
+
+# Redis key published by the state-tracker daemon (state-tracker/). Read
+# read-only and treated as optional -- the bridge must work without it.
+_STATE_ML_KEY = "state:ml"
 
 
 class SourceCenterRole(Role):
@@ -101,6 +107,14 @@ class SourceCenterRole(Role):
         # thread waits on this with timeout.
         self._wake_acks: dict = {}
         self._wake_acks_lock = threading.Lock()
+        # Source bytes the bus has currently granted us: added on
+        # DIST_REQUEST, dropped on RELEASE / STANDBY for that source.
+        # Used to avoid waking a system that is already on our source.
+        self._granted: set = set()
+        # Where auto-wake telegrams are addressed. Set from config by
+        # ml_source_bridge.main(); "vm" reproduces the captured real-SC
+        # behaviour. May also be "am", "off", or an int address.
+        self.wake_target: object = "vm"
         # Lock-manager state machine. We OBSERVE the VM<->AM lock-manager
         # dance for diagnostics (passive_observe()), but we do NOT
         # initiate or acquire the key. Confirmed from the BS5 capture:
@@ -210,13 +224,19 @@ class SourceCenterRole(Role):
         # we self-trigger via _wake_with_retries() and a real one
         # arrives moments later from the actual AM.
         now = time.monotonic()
-        last = self._last_handshake_at.get(requested, 0.0)
-        if (now - last) < self._DIST_REQUEST_DEDUP_S:
+        # None (not 0.0) for "never ran": time.monotonic()'s epoch is
+        # platform-defined -- per-process on macOS, since-boot on Linux --
+        # so a 0.0 default makes the FIRST request look like it happened
+        # moments ago and silently drops it whenever monotonic() is still
+        # below the dedup window.
+        last = self._last_handshake_at.get(requested)
+        if last is not None and (now - last) < self._DIST_REQUEST_DEDUP_S:
             log(f"[sc] DIST_REQUEST 0x{requested:02x} from "
                 f"0x{t.from_addr:02x} -- handshake already ran "
                 f"{now - last:.2f}s ago, skipping (dedup)")
             return
         self._last_handshake_at[requested] = now
+        self._granted.add(requested)
         log(f"[sc] DIST_REQUEST 0x{requested:02x} from 0x{t.from_addr:02x}"
             f" -- claim handshake (provider={provider.display_name!r})")
         send = ctx.bus.send
@@ -232,7 +252,7 @@ class SourceCenterRole(Role):
         # the full ext_info 1-6 sequence, then a final DISPLAY_SOURCE
         # refresh). Cadence is also from the capture (DISPLAY_SOURCE
         # twice with a ~200ms gap; STATUS / TRACK_INFO / DISPLAY tight).
-        send(B.sc_distribution_grant(to=t.from_addr))
+        send(B.sc_distribution_grant(to=t.from_addr, source_byte=requested))
         time.sleep(0.20)
         send(B.sc_status_info(source_byte=requested))
         time.sleep(0.005)
@@ -273,10 +293,12 @@ class SourceCenterRole(Role):
         if provider is not None:
             log(f"[sc] RELEASE 0x{t.src_dest:02x} from 0x{t.from_addr:02x}"
                 f" -- pausing {provider.display_name!r}")
+            self._granted.discard(t.src_dest)
             provider.pause()
         elif t.src_dest == 0:
             log(f"[sc] generic RELEASE from 0x{t.from_addr:02x}"
                 f" -- pausing all providers")
+            self._granted.clear()
             for p in ctx.providers.values():
                 p.pause()
 
@@ -295,10 +317,12 @@ class SourceCenterRole(Role):
         if provider is not None:
             log(f"[sc] STANDBY 0x{t.src_dest:02x} from 0x{t.from_addr:02x}"
                 f" -- pausing {provider.display_name!r}")
+            self._granted.discard(t.src_dest)
             provider.pause()
         elif t.src_dest == 0:
             log(f"[sc] generic STANDBY from 0x{t.from_addr:02x}"
                 f" -- pausing all providers")
+            self._granted.clear()
             for p in ctx.providers.values():
                 p.pause()
 
@@ -360,6 +384,21 @@ class SourceCenterRole(Role):
             # Single-active-source: pause any other provider that was
             # still streaming before we wake the bus to this one.
             ctx.pause_other_providers(provider)
+            # ...but only wake a system that isn't already on us. The
+            # stream starting is not by itself a reason to change what
+            # the house is doing: if the user already selected our
+            # source, the bus is on it and a wake here just drags the
+            # wake target (by default the VM -- i.e. the main-room TV)
+            # into a session it was never part of.
+            why = self._already_on_our_source(ctx, provider)
+            if why is not None:
+                log(f"[sc] stream started on "
+                    f"0x{provider.source_byte:02x} -- not waking: {why}")
+                return
+            if self.wake_target == "off":
+                log(f"[sc] stream started on 0x{provider.source_byte:02x}"
+                    f" -- wake_target=off, not waking")
+                return
             # Wake the system, with retries -- the music system can be
             # unresponsive for a few seconds after a prior shutdown
             # sequence, and the wake gets ignored if we send it during
@@ -490,6 +529,55 @@ class SourceCenterRole(Role):
             f"with Beo4 0x{beo4:02x} ({why}, FROM spoofed as AM)")
         ctx.bus.send(B.wake_via_vm(key=beo4))
 
+    def _already_on_our_source(self, ctx: Context,
+                               provider: object) -> "str | None":
+        """Reason the bus is already on this provider's source, else None.
+
+        Two sources of truth, because neither alone is enough:
+
+        1. Our own grant set -- authoritative while we've been running,
+           but empty after a bridge restart mid-session.
+        2. `state:ml` from the state-tracker daemon, which snoops the bus
+           and survives our restarts. Optional: if the daemon isn't
+           running the key is simply absent and we fall back to (1).
+        """
+        src = provider.source_byte
+        if src in self._granted:
+            return ("already granted to us "
+                    "(DIST_REQUEST seen, no RELEASE since)")
+        try:
+            raw = ctx.bus.r.get(_STATE_ML_KEY)
+        except Exception:
+            return None                      # redis hiccup: don't block a wake
+        if not raw:
+            return None                      # no state-tracker running
+        try:
+            blob = json.loads(raw)
+        except (ValueError, TypeError):
+            return None
+        for slot in ("am", "vm"):
+            entry = blob.get(slot) or {}
+            value = entry.get("source")
+            if isinstance(value, str):
+                try:
+                    value = int(value, 16)
+                except ValueError:
+                    continue
+            if value == src and entry.get("playing"):
+                return (f"state:ml reports the {slot.upper()} is already "
+                        f"playing this source")
+        return None
+
+    def _wake_telegram(self, key: int):
+        """Build the wake telegram for the configured target."""
+        target = self.wake_target
+        if isinstance(target, int):
+            return (B.wake_via_addr(to=target, key=key),
+                    f"0x{target:02x}")
+        if target == "am":
+            return B.wake_via_am(frm=ADDR_SC, key=key), "AM (0xC1)"
+        return B.wake_via_vm(key=key), "VM (0xC0)"
+
     def _wake_with_retries(self, ctx: Context, provider: object) -> None:
         """Mirror the captured BS5-SC source-activation flow: TX one
         wake virtual_beo4 to VM (FROM=AM-spoof, PC-form bytes), then
@@ -558,7 +646,9 @@ class SourceCenterRole(Role):
             # emits in the capture. After this lands, the real VM and
             # AM autonomously dance through their lock + commit cycle,
             # ending with AM sending a real DIST_REQUEST to us.
-            ctx.bus.send(B.wake_via_vm(key=beo4))
+            telegram, where = self._wake_telegram(beo4)
+            log(f"[sc]   wake -> {where}")
+            ctx.bus.send(telegram)
 
             if ack.wait(timeout=self._WAKE_RETRY_TIMEOUT_S):
                 log(f"[sc] wake for 0x{src:02x} acked after attempt "

@@ -29,7 +29,23 @@ broadcast_clock = true
 # Auto-wake: when a provider's audio stream starts (e.g. AirPlay session
 # begins), inject a virtual Beo4 keypress so the AM/VM switches to that
 # source automatically.
+#
+# The wake is SKIPPED when the bus is already on our source -- i.e. you
+# picked the source on a remote and the stream only started afterwards.
+# Waking there would drag the wake target into a session it was never part
+# of (in a multi-room house the VM is the main-room TV, so the main room
+# switches itself on mid-listening).
 auto_wake = true
+
+# Where the auto-wake telegram is addressed:
+#   "vm"   video master (default) -- what a real B&O Source Center does
+#   "am"   audio master           -- for AM-only setups, or when you don't
+#                                   want the main-room TV coming on
+#   "off"  never wake             -- same as auto_wake = false
+#   0x06   any ML address         -- e.g. a single link node, so only that
+#                                   room comes up. UNVERIFIED: a link node
+#                                   is not a master and may ignore it.
+wake_target = "vm"
 
 
 # ---- redis broker -----------------------------------------------------------
@@ -64,6 +80,22 @@ redis_port = 6379
 #                   [turntable] section below. NOT a default for any source:
 #                   set provider = "turntable" on whichever source you want
 #                   to give up (N.RADIO 0xA1 is the usual choice).
+#
+# Multi-provider on one source: `provider` can also be a LIST of provider
+# names -- whichever sub currently has a live stream owns the ML source.
+# Last-writer-wins: starting a new sub pauses the previously active one,
+# so only one audio path is on the bus at a time. Set `provider_default`
+# to choose which sub receives a Beo4 PLAY when nothing is playing yet
+# (defaults to the first entry in the list).
+#
+# Sub-display names come from the top-level [provider_displays] table:
+# each provider name maps to the friendly label shown on the B&O display
+# WHILE that sub is active. When the source is idle, the source-level
+# `display_name` is shown instead.
+
+[provider_displays]
+airplay  = "Apple Music"
+sendspin = "Music Assistant"
 
 [[sources]]
 source_byte  = 0xA1            # N.RADIO
@@ -81,6 +113,14 @@ display_name = "N.RADIO"        # optional; up to 11 chars ASCII
 # source_byte  = 0xA1           # N.RADIO
 # provider     = "turntable"
 # display_name = "PHONO"
+
+# N.MUSIC as a multi-backend source: AirPlay AND Sendspin share it,
+# last-writer-wins. Beo4 PLAY from a cold state goes to airplay.
+# [[sources]]
+# source_byte      = 0x7A       # N.MUSIC
+# provider         = ["airplay", "sendspin"]
+# provider_default = "airplay"
+# display_name     = "N.MUSIC"
 
 
 # ---- turntable provider (DL'80 Beogram as an ML source) --------------------
