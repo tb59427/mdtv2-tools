@@ -78,6 +78,10 @@ class MultiSourceProvider(SourceProvider):
         # (or None if nothing was playing at last check). Updated inside
         # is_playing(); read by display_name / metadata / next / prev.
         self._active_idx: Optional[int] = None
+        # Diagnostic: last playing-set signature we logged, so we only
+        # log per transition instead of per poll. Temporary aid for
+        # tracking sub-switch behaviour on the real bridge.
+        self._last_logged_playing: Optional[tuple[int, ...]] = None
 
     # ---- display_name is dynamic ------------------------------------------
 
@@ -163,6 +167,15 @@ class MultiSourceProvider(SourceProvider):
                 log(f"[multi 0x{self.source_byte:02x}] sub "
                     f"{self._sub_displays[i]!r} is_playing raised: {e}",
                     err=True)
+        # Diagnostic: log the playing set on every change so we can see
+        # what the wrapper actually observes -- useful for debugging why
+        # last-writer-wins isn't switching.
+        sig = tuple(playing)
+        if sig != self._last_logged_playing:
+            names = [self._sub_displays[i] for i in playing] or ["<none>"]
+            log(f"[multi 0x{self.source_byte:02x}] playing set changed: "
+                f"{names} (active_idx={self._active_idx})")
+            self._last_logged_playing = sig
         if not playing:
             if self._active_idx is not None:
                 self._active_idx = None
