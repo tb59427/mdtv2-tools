@@ -60,6 +60,7 @@ from core.telegram import (
 from core.topology import Topology
 from providers.airplay import AirPlayProvider
 from providers.base import SourceProvider
+from providers.multi import MultiSourceProvider
 from providers.sendspin import SendspinProvider
 from providers.turntable import TurntableProvider
 from roles.audio_master import AudioMasterRole
@@ -126,9 +127,10 @@ def _resolve_sources(cfg: dict, args) -> list[dict]:
     """
     if args.src is not None:
         return [{
-            "source_byte":  args.src,
-            "provider":     args.provider or "airplay",
-            "display_name": args.display,   # may be None -> default-table lookup
+            "source_byte":     args.src,
+            "provider":        args.provider or "airplay",
+            "provider_default": None,
+            "display_name":    args.display,   # may be None -> default-table lookup
         }]
     raw = cfg.get("sources") or []
     if not isinstance(raw, list):
@@ -138,20 +140,75 @@ def _resolve_sources(cfg: dict, args) -> list[dict]:
         if "source_byte" not in entry:
             raise SystemExit(
                 f"config sources[{i}] is missing 'source_byte'")
+        prov = entry.get("provider", "airplay")
+        # provider can be either a plain string (single-provider source,
+        # legacy shape) or a list of strings (multi-provider fan-out via
+        # MultiSourceProvider). Anything else is a config error caught
+        # later in make_provider().
+        if isinstance(prov, list) and not prov:
+            raise SystemExit(
+                f"config sources[{i}] provider list is empty")
         out.append({
-            "source_byte":  int(entry["source_byte"]),
-            "provider":     entry.get("provider", "airplay"),
-            "display_name": entry.get("display_name"),
+            "source_byte":      int(entry["source_byte"]),
+            "provider":         prov,
+            "provider_default": entry.get("provider_default"),
+            "display_name":     entry.get("display_name"),
         })
     return out
 
 
 # ----------------------------------------------------------------------------
 
-def make_provider(name: str, source_byte: int, display_name: str,
+def make_provider(name, source_byte: int, display_name: str,
                   *, cfg: Optional[dict] = None,
+                  provider_default: Optional[str] = None,
                   redis_host: str = "localhost",
                   redis_port: int = 6379) -> SourceProvider:
+    """Build a SourceProvider for one ML source byte.
+
+    `name` is either a single provider name (string) or a list of names
+    (multi-provider source, wrapped in MultiSourceProvider). For the
+    multi case, `provider_default` selects which sub-provider gets a
+    Play command when nothing is currently playing (defaults to the
+    first entry in the list). Sub-provider display names come from a
+    top-level `[provider_displays]` table in the config, keyed by
+    provider name; falls back to the source-level display_name if the
+    entry is missing.
+    """
+    if isinstance(name, list):
+        displays_map = (cfg or {}).get("provider_displays") or {}
+        subs: list[SourceProvider] = []
+        sub_displays: list[str] = []
+        for sub_name in name:
+            if not isinstance(sub_name, str):
+                raise SystemExit(
+                    f"provider list entries must be strings, got {sub_name!r}")
+            # Recurse: each sub is a plain single-provider build. Its
+            # own display_name gets overwritten by the wrapper's dynamic
+            # property, so pass the source-level fallback for logging.
+            subs.append(make_provider(
+                sub_name, source_byte, display_name,
+                cfg=cfg, redis_host=redis_host, redis_port=redis_port))
+            sub_displays.append(displays_map.get(sub_name, display_name))
+        # Default sub: named in config, or first entry.
+        if provider_default is None:
+            default_idx = 0
+        else:
+            try:
+                default_idx = name.index(provider_default)
+            except ValueError:
+                raise SystemExit(
+                    f"provider_default={provider_default!r} not in "
+                    f"provider list {name!r}")
+        return MultiSourceProvider(
+            source_byte=source_byte,
+            fallback_display=display_name,
+            subs=subs,
+            sub_displays=sub_displays,
+            default_idx=default_idx,
+        )
+
+    # Single-provider (legacy) shape.
     if name == "airplay":
         return AirPlayProvider(source_byte=source_byte,
                                display_name=display_name)
@@ -401,18 +458,23 @@ def main() -> int:
     setattr(role, "wake_target", wake_target)
 
     # Build providers dict: source byte -> SourceProvider.
+    # A source with a list-valued `provider` is transparently wrapped in
+    # a MultiSourceProvider by make_provider(); from here it looks like
+    # any other single provider.
     providers: dict[int, SourceProvider] = {}
     for entry in sources_list:
-        src     = entry["source_byte"]
-        pname   = entry.get("provider", "airplay")
-        display = entry.get("display_name") or _DEFAULT_DISPLAY.get(
+        src        = entry["source_byte"]
+        pname      = entry.get("provider", "airplay")
+        pdefault   = entry.get("provider_default")
+        display    = entry.get("display_name") or _DEFAULT_DISPLAY.get(
             src, f"0x{src:02x}")
         if src in providers:
             raise SystemExit(
                 f"duplicate source_byte 0x{src:02x} in config -- "
-                f"each source byte may have only one provider")
+                f"each source byte may have only one entry")
         providers[src] = make_provider(
             pname, src, display, cfg=cfg,
+            provider_default=pdefault,
             redis_host=redis_host, redis_port=redis_port)
 
     log(f"[main] role={role.name} addr=0x{role.own_address:02x}  "
