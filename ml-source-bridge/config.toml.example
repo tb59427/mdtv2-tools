@@ -55,6 +55,10 @@ redis_port = 6379
 # Available providers:
 #   "airplay"    -- shairport-sync via D-Bus (one shairport instance shared
 #                   across all airplay sources)
+#   "sendspin"   -- Open Home Foundation multi-room audio via the sendspin
+#                   daemon's MPRIS interface (`systemctl status sendspin`).
+#                   Same shape as airplay: daemon feeds the DAC, we drive
+#                   transport + read metadata over D-Bus.
 #   "turntable"  -- a DL'80 Beogram turntable, controlled over the Datalink
 #                   wire and looped ADC -> DAC into ML. Configure it in the
 #                   [turntable] section below. NOT a default for any source:
