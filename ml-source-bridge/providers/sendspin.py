@@ -35,7 +35,6 @@ from __future__ import annotations
 import pwd
 import re
 import subprocess
-import threading
 import time
 from typing import Optional
 
@@ -60,12 +59,11 @@ _MPRIS_PLAYER_IFACE = "org.mpris.MediaPlayer2.Player"
 
 _PLAYBACK_STATUS_RE = re.compile(r'variant\s+string\s+"(.*?)"')
 
-# How long to keep ALSA muted after a skip (covers the sendspin buffer
-# drain). Buffers are typically ~5-6s at steady state; the mute is just
-# to cover the audible tail during the transport switch, so keep it
-# tight -- bump if the previous track leaks through.
-_SKIP_MUTE_SECONDS = 1.5
-_ALSA_MIXER_NAME   = "Digital"
+# Note: no ALSA-mute-on-skip logic here (unlike the AirPlay provider).
+# The sendspin daemon flushes its own buffer on track change cleanly, so
+# the extra mute just risks leaving the mixer stuck muted if the unmute
+# call ever fails. If a real audible tail from the previous track shows
+# up on skip, revisit -- but put the unmute in a try/finally then.
 
 # Debounce for transport commands. The AM/VM emits multiple RELEASE
 # telegrams in quick succession during source teardown; without this
@@ -116,9 +114,6 @@ class SendspinProvider(SourceProvider):
         # suffix. Re-discovered on start() and whenever a call fails
         # (which typically means sendspin restarted with a new pid).
         self._dest: Optional[str] = None
-        self._mute_event = threading.Event()
-        self._mute_thread: Optional[threading.Thread] = None
-        self._stop = threading.Event()
         self._last_call: dict[str, float] = {}
         self._call_lock = threading.Lock()
 
@@ -140,16 +135,8 @@ class SendspinProvider(SourceProvider):
             else:
                 self._dest = found
                 log(f"[sendspin] latched onto D-Bus name {found!r}")
-        if self._mute_thread is None or not self._mute_thread.is_alive():
-            self._stop.clear()
-            self._mute_thread = threading.Thread(
-                target=self._mute_loop, name="sendspin-mute", daemon=True)
-            self._mute_thread.start()
-
     def stop(self) -> None:
         self.pause()
-        self._stop.set()
-        self._mute_event.set()
 
     # ---- transport ---------------------------------------------------------
 
@@ -166,13 +153,11 @@ class SendspinProvider(SourceProvider):
     def next(self) -> None:
         if self._debounce("Next"):
             log("[sendspin] NEXT")
-            self._mute_event.set()
             self._dbus_call("Next")
 
     def prev(self) -> None:
         if self._debounce("Previous"):
             log("[sendspin] PREV")
-            self._mute_event.set()
             self._dbus_call("Previous")
 
     # ---- introspection ------------------------------------------------------
@@ -322,7 +307,7 @@ class SendspinProvider(SourceProvider):
                 return n
         return None
 
-    # ---- private: debounce + mute loop -------------------------------------
+    # ---- private: debounce --------------------------------------------------
 
     def _debounce(self, method: str) -> bool:
         now = time.monotonic()
@@ -332,25 +317,3 @@ class SendspinProvider(SourceProvider):
                 return False
             self._last_call[method] = now
         return True
-
-    def _mute_loop(self) -> None:
-        while not self._stop.is_set():
-            if not self._mute_event.wait(timeout=None):
-                continue
-            self._mute_event.clear()
-            if self._stop.is_set():
-                return
-            _alsa_set(mute=True)
-            self._stop.wait(_SKIP_MUTE_SECONDS)
-            _alsa_set(mute=False)
-
-
-# ----------------------------------------------------------------------------
-
-def _alsa_set(mute: bool) -> None:
-    state = "mute" if mute else "unmute"
-    try:
-        subprocess.run(["amixer", "set", _ALSA_MIXER_NAME, state],
-                       capture_output=True, check=False, timeout=2.0)
-    except (FileNotFoundError, subprocess.TimeoutExpired) as e:
-        log(f"[sendspin] amixer {state}: {e}", err=True)
