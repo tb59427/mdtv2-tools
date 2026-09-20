@@ -60,6 +60,7 @@ from core.telegram import (
 from core.topology import Topology
 from providers.airplay import AirPlayProvider
 from providers.base import SourceProvider
+from providers.sendspin import SendspinProvider
 from providers.turntable import TurntableProvider
 from roles.audio_master import AudioMasterRole
 from roles.source_center import SourceCenterRole
@@ -154,6 +155,9 @@ def make_provider(name: str, source_byte: int, display_name: str,
     if name == "airplay":
         return AirPlayProvider(source_byte=source_byte,
                                display_name=display_name)
+    if name == "sendspin":
+        return SendspinProvider(source_byte=source_byte,
+                                display_name=display_name)
     if name == "turntable":
         # Provider-specific settings live in their own [turntable] table
         # (ALSA devices, RIAA, ADC gain, DL'80 opcode overrides).
