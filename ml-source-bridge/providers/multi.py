@@ -45,10 +45,19 @@ Semantics:
 """
 from __future__ import annotations
 
+import threading
 from typing import Optional
 
 from core.bus import log
 from providers.base import Metadata, SourceProvider
+
+
+# How often the internal poll thread refreshes the active-sub state.
+# Matches the bridge's own stream-watcher cadence (1 s). We poll
+# ourselves rather than lean on that watcher because it only runs when
+# auto_wake is on -- and Multi's last-writer-wins logic must work
+# regardless.
+_POLL_INTERVAL_S = 1.0
 
 
 class MultiSourceProvider(SourceProvider):
@@ -82,6 +91,11 @@ class MultiSourceProvider(SourceProvider):
         # log per transition instead of per poll. Temporary aid for
         # tracking sub-switch behaviour on the real bridge.
         self._last_logged_playing: Optional[tuple[int, ...]] = None
+        # Own poll thread: keeps _active_idx current independent of the
+        # bridge's stream-watcher, which is gated on auto_wake. Started
+        # in start(), stopped in stop().
+        self._stop_evt = threading.Event()
+        self._poll_thread: Optional[threading.Thread] = None
 
     # ---- display_name is dynamic ------------------------------------------
 
@@ -110,8 +124,21 @@ class MultiSourceProvider(SourceProvider):
             except Exception as e:
                 log(f"[multi 0x{self.source_byte:02x}] sub "
                     f"{self._sub_displays[i]!r} start failed: {e}", err=True)
+        # Own poll thread so is_playing() is called regularly even when
+        # the bridge's stream-watcher is off (auto_wake=false). Without
+        # it _active_idx stays None and next()/prev()/metadata() have
+        # nothing to route to.
+        if self._poll_thread is None or not self._poll_thread.is_alive():
+            self._stop_evt.clear()
+            self._poll_thread = threading.Thread(
+                target=self._poll_loop,
+                name=f"multi-poll-0x{self.source_byte:02x}",
+                daemon=True,
+            )
+            self._poll_thread.start()
 
     def stop(self) -> None:
+        self._stop_evt.set()
         for i, sub in enumerate(self._subs):
             try:
                 sub.stop()
@@ -134,10 +161,17 @@ class MultiSourceProvider(SourceProvider):
             self._safe_call(i, "pause")
 
     def next(self) -> None:
+        # If _active_idx is stale/unset (e.g. next() fires before the
+        # poll thread has caught the running sub), sync it via a
+        # cheap is_playing() sweep so the command goes to the right sub.
+        if self._active_idx is None:
+            self.is_playing()
         if self._active_idx is not None:
             self._safe_call(self._active_idx, "next")
 
     def prev(self) -> None:
+        if self._active_idx is None:
+            self.is_playing()
         if self._active_idx is not None:
             self._safe_call(self._active_idx, "prev")
 
@@ -226,3 +260,22 @@ class MultiSourceProvider(SourceProvider):
             log(f"[multi 0x{self.source_byte:02x}] sub "
                 f"{self._sub_displays[idx]!r} {method}() raised: {e}",
                 err=True)
+
+    def _poll_loop(self) -> None:
+        """Background: call is_playing() every _POLL_INTERVAL_S so the
+        last-writer-wins logic maintains _active_idx even when the
+        bridge's stream-watcher isn't running (auto_wake=false).
+
+        No further work needed beyond the is_playing() side-effect --
+        display_name (property) and metadata() follow _active_idx
+        automatically. Exceptions inside is_playing are already caught
+        per-sub; we still wrap here so an outer failure can't kill the
+        thread silently.
+        """
+        while not self._stop_evt.is_set():
+            try:
+                self.is_playing()
+            except Exception as e:
+                log(f"[multi 0x{self.source_byte:02x}] poll loop error: "
+                    f"{e}", err=True)
+            self._stop_evt.wait(_POLL_INTERVAL_S)
