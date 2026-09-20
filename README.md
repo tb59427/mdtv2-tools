@@ -1,5 +1,5 @@
 # TB version of mdtv2-tools
-This is a clone from Philip Voigt's great Masterlink Toolset MDTV2 (here's the gitlab repo: https://gitlab.com/masterdatatool/software/mdtv2-tools)
+This is a clone from Philip Voigt's great Masterlink Toolset MDTV2 (here's the gitlab repo: https://gitlab.com/masterdatatool/software/mdtv2-tools
 I have started to experiment with a sendspin provider which this repo contains in addition to all of Philip's stuff. Still in experimental state.
 
 # mdtv2-tools
