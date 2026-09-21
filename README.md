@@ -1,6 +1,6 @@
 # TB version of mdtv2-tools
-This is a clone from Philip Voigt's great Masterlink Toolset MDTV2 (here's the gitlab repo: https://gitlab.com/masterdatatool/software/mdtv2-tools
-I have started to experiment with a sendspin provider which this repo contains in addition to all of Philip's stuff. Still in experimental state.
+This is a clone from Philip Voigt's great Masterlink Toolset MDTV2 (here's the gitlab repo: https://gitlab.com/masterdatatool/software/mdtv2-tools)
+I have started to experiment with a sendspin provider which this repo contains in addition to all of Philip's stuff. Still in experimental state. Also this repo contains changes to allow more than one streaming protocol per B&O source (e.g. sendspin and airplay for N.MUSIC)
 
 # mdtv2-tools
 
@@ -117,7 +117,16 @@ role = "sc"           # or "am"
 [[sources]]
 source_byte  = 0xA1   # N.RADIO
 provider     = "airplay"
+# or, for multiple providers 
+# provider = ["sendspin", "airplay"]
+# provider_default = "sendspin"
 display_name = "N.RADIO"
+
+# when using multiple providers for one Source set a name for each provider
+# ---- display per provider  --------------------------------------------------
+# [provider_displays]
+# airplay  = "Apple Music"
+# sendspin = "Music Assistant"
 
 # Beo4 LIGHT key → arbitrary shell commands (home automation hook)
 [light_handler]
