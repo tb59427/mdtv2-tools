@@ -246,18 +246,14 @@ class AirPlayProvider(SourceProvider):
         accepts an inbound AirPlay session, which is exactly the right
         edge to trigger our wake on.
 
-        Falls back to ALSA RUNNING if the MPRIS query fails (shairport
-        not running, dbus issue, etc.) so we degrade gracefully.
+        No ALSA fallback anymore: in a dmix / multi-provider setup the
+        PCM state stays RUNNING as long as *any* client (e.g. sendspin)
+        is streaming, so falling back to it makes AirPlay falsely claim
+        to be playing whenever another sub is active. MPRIS unreachable
+        is treated as "not playing" -- the honest answer.
         """
         status = _dbus_get_mpris_playback_status()
-        if status is not None:
-            return status == "Playing"
-        # Fallback: ALSA RUNNING (less accurate but works if MPRIS down)
-        try:
-            with open("/proc/asound/card0/pcm0p/sub0/status", "r") as f:
-                return "RUNNING" in f.read()
-        except FileNotFoundError:
-            return False
+        return status == "Playing" if status is not None else False
 
     def metadata(self) -> Optional[Metadata]:
         out = _dbus_get_metadata()

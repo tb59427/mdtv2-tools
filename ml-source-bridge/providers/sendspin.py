@@ -165,16 +165,17 @@ class SendspinProvider(SourceProvider):
 
     def is_playing(self) -> bool:
         """True when sendspin's MPRIS PlaybackStatus is 'Playing'.
-        Falls back to ALSA RUNNING when MPRIS can't be reached (daemon
-        down between streams, dbus hiccup) so we degrade gracefully."""
+
+        No ALSA fallback: in a dmix / multi-provider setup the PCM
+        state stays RUNNING as long as *any* client (e.g. shairport) is
+        streaming, so falling back to it makes sendspin falsely claim
+        to be playing whenever another sub is active -- and the multi
+        wrapper then ping-pongs between the two. MPRIS unreachable
+        (daemon idle, no name registered, dbus hiccup) is treated as
+        "not playing" -- the honest answer.
+        """
         status = self._dbus_get_property("PlaybackStatus")
-        if status is not None:
-            return status == "Playing"
-        try:
-            with open("/proc/asound/card0/pcm0p/sub0/status", "r") as f:
-                return "RUNNING" in f.read()
-        except FileNotFoundError:
-            return False
+        return status == "Playing" if status is not None else False
 
     def metadata(self) -> Optional[Metadata]:
         out = self._dbus_get_property_raw("Metadata")
