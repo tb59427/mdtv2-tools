@@ -60,6 +60,7 @@ from core.telegram import (
 from core.topology import Topology
 from providers.airplay import AirPlayProvider
 from providers.base import SourceProvider
+from providers.mpd import MpdProvider
 from providers.multi import MultiSourceProvider
 from providers.sendspin import SendspinProvider
 from providers.turntable import TurntableProvider
@@ -215,6 +216,17 @@ def make_provider(name, source_byte: int, display_name: str,
     if name == "sendspin":
         return SendspinProvider(source_byte=source_byte,
                                 display_name=display_name)
+    if name == "mpd":
+        # [mpd] section is optional -- defaults are localhost:6600, no
+        # password (the standard MPD out-of-the-box config on Debian).
+        mpd_cfg = (cfg or {}).get("mpd") or {}
+        return MpdProvider(
+            source_byte=source_byte,
+            display_name=display_name,
+            host=str(mpd_cfg.get("host", "localhost")),
+            port=int(mpd_cfg.get("port", 6600)),
+            password=str(mpd_cfg.get("password", "")),
+        )
     if name == "turntable":
         # Provider-specific settings live in their own [turntable] table
         # (ALSA devices, RIAA, ADC gain, DL'80 opcode overrides).
