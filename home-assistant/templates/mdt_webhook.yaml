@@ -1,0 +1,56 @@
+# Trigger template sensors fed by ha-notifier on the Pi -- one per ML source
+# it reports. Goes into configuration.yaml (the UI can't create trigger
+# sensors). See docs/home-assistant.md.
+#
+#   sensor.mdt_n_music  N.MUSIC: which provider plays (Sendspin/MA, AirPlay,
+#                       ...), title/artist/album, cover
+#   sensor.mdt_phono    the turntable source (display_name "BG7000" here):
+#                       title/artist/album/cover once music recognition has
+#                       identified the record, empty otherwise
+#
+# Both share one webhook. Every POST triggers both sensors; each takes the
+# message only if it's for its source and otherwise keeps its state.
+#
+# secrets.yaml (the name predates the turntable sensor; kept for existing
+# setups):
+#   mdt_nmusic_webhook: mdt-nmusic-<long-random-value>
+# On the Pi, /etc/ml-source-bridge.toml:
+#   [ha_notifier]
+#   url     = "http://<ha>:8123/api/webhook/<id>"
+#   sources = ["N.MUSIC", "BG7000"]
+#
+# state: playing / paused / idle; on idle the attributes are empty.
+# cover_url: on N.MUSIC served by the Pi (http://<pi>.local:8099/cover/…),
+# on the turntable Shazam's https cover URL. The browser loads it directly
+# -- fine while HA is opened over http in the LAN.
+template:
+  - trigger:
+      - trigger: webhook
+        webhook_id: !secret mdt_nmusic_webhook
+        allowed_methods: [POST]
+        local_only: true
+    sensor:
+      - name: MDT N.MUSIC
+        unique_id: mdt_nmusic
+        state: >-
+          {% if trigger.json.source == 'N.MUSIC' %}{{ trigger.json.state | default('idle') }}
+          {%- elif this.state in ['unknown', 'unavailable'] %}idle
+          {%- else %}{{ this.state }}{% endif %}
+        attributes:
+          provider: "{{ trigger.json.provider | default('') if trigger.json.source == 'N.MUSIC' else this.attributes.get('provider', '') }}"
+          display: "{{ trigger.json.display | default('') if trigger.json.source == 'N.MUSIC' else this.attributes.get('display', '') }}"
+          title: "{{ trigger.json.title | default('') if trigger.json.source == 'N.MUSIC' else this.attributes.get('title', '') }}"
+          artist: "{{ trigger.json.artist | default('') if trigger.json.source == 'N.MUSIC' else this.attributes.get('artist', '') }}"
+          album: "{{ trigger.json.album | default('') if trigger.json.source == 'N.MUSIC' else this.attributes.get('album', '') }}"
+          cover_url: "{{ trigger.json.cover_url | default('') if trigger.json.source == 'N.MUSIC' else this.attributes.get('cover_url', '') }}"
+      - name: MDT Phono
+        unique_id: mdt_phono
+        state: >-
+          {% if trigger.json.source == 'BG7000' %}{{ trigger.json.state | default('idle') }}
+          {%- elif this.state in ['unknown', 'unavailable'] %}idle
+          {%- else %}{{ this.state }}{% endif %}
+        attributes:
+          title: "{{ trigger.json.title | default('') if trigger.json.source == 'BG7000' else this.attributes.get('title', '') }}"
+          artist: "{{ trigger.json.artist | default('') if trigger.json.source == 'BG7000' else this.attributes.get('artist', '') }}"
+          album: "{{ trigger.json.album | default('') if trigger.json.source == 'BG7000' else this.attributes.get('album', '') }}"
+          cover_url: "{{ trigger.json.cover_url | default('') if trigger.json.source == 'BG7000' else this.attributes.get('cover_url', '') }}"

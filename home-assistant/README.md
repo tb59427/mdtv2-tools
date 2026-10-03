@@ -1,7 +1,8 @@
 # Home Assistant -- N.MUSIC
 
 Home Assistant configuration for the Masterlink source N.MUSIC fed by the Pi:
-Music Assistant (via Sendspin) and AirPlay, Beo4 control, dashboard card.
+Music Assistant (via Sendspin) and AirPlay, plus the turntable with music
+recognition, Beo4 control, one dashboard card for all of it.
 **Setup guide: [docs/home-assistant.md](../docs/home-assistant.md).**
 
 | Folder | Contents |
@@ -11,6 +12,7 @@ Music Assistant (via Sendspin) and AirPlay, Beo4 control, dashboard card.
 | `templates/` | State templates of the template sensors (`.jinja`) and the webhook sensor `sensor.mdt_n_music` (goes into `configuration.yaml`) |
 | `dashboard/` | The card (needs `custom:button-card` from HACS) |
 | `helpers/` | Reference list of the helpers (documentation only) |
+| `www/mdt/` | Default turntable image for the card -- copy to `/config/www/mdt/` |
 
 Everything except the webhook sensor is created in the HA UI: open the
 automation / script / card → *Edit in YAML* → paste. Placeholders are marked

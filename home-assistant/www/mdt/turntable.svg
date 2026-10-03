@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 450" role="img" aria-label="Turntable">
+  <!-- Generic tangential-arm turntable, top view; default card background
+       for the turntable source while no track is recognized. Replace with
+       your own photo if you like (see docs/home-assistant.md). -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2b2f33"/>
+      <stop offset="1" stop-color="#121417"/>
+    </linearGradient>
+    <linearGradient id="alu" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#d9dcdf"/>
+      <stop offset="0.5" stop-color="#a9adb2"/>
+      <stop offset="1" stop-color="#cfd2d5"/>
+    </linearGradient>
+    <radialGradient id="vinyl" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#1c1c1c"/>
+      <stop offset="1" stop-color="#050505"/>
+    </radialGradient>
+    <linearGradient id="sheen" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#fff" stop-opacity="0"/>
+      <stop offset="0.45" stop-color="#fff" stop-opacity="0.10"/>
+      <stop offset="0.55" stop-color="#fff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <rect width="800" height="450" fill="url(#bg)"/>
+  <!-- plinth -->
+  <rect x="90" y="60" width="620" height="340" rx="10" fill="url(#alu)"/>
+  <rect x="90" y="360" width="620" height="40" rx="10" fill="#7d8186"/>
+  <!-- platter + record -->
+  <circle cx="330" cy="220" r="138" fill="#8e9297"/>
+  <circle cx="330" cy="220" r="130" fill="url(#vinyl)"/>
+  <g fill="none" stroke="#2a2a2a" stroke-width="1">
+    <circle cx="330" cy="220" r="118"/><circle cx="330" cy="220" r="104"/>
+    <circle cx="330" cy="220" r="90"/><circle cx="330" cy="220" r="76"/>
+    <circle cx="330" cy="220" r="62"/>
+  </g>
+  <circle cx="330" cy="220" r="130" fill="url(#sheen)"/>
+  <circle cx="330" cy="220" r="38" fill="#b23a2c"/>
+  <circle cx="330" cy="220" r="4" fill="#ddd"/>
+  <!-- tangential arm: rail along the back, carriage over the record -->
+  <rect x="150" y="84" width="420" height="14" rx="7" fill="#5f6368"/>
+  <rect x="300" y="78" width="26" height="26" rx="4" fill="#3c4043"/>
+  <rect x="308" y="98" width="10" height="70" rx="3" fill="#3c4043"/>
+  <!-- controls -->
+  <rect x="560" y="300" width="120" height="26" rx="4" fill="#5f6368"/>
+  <circle cx="590" cy="313" r="5" fill="#d33"/>
+</svg>
