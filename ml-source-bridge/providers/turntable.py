@@ -48,6 +48,7 @@ findings are worth knowing:
 from __future__ import annotations
 
 import os
+import shlex
 import shutil
 import signal
 import subprocess
@@ -156,6 +157,15 @@ class TurntableProvider(SourceProvider):
         self._riaa = bool(cfg.get("riaa", False))
         self._riaa_hp = float(cfg.get("riaa_highpass_hz", 30.0))
         self._riaa_gain = float(cfg.get("riaa_gain_db", 0.0))
+
+        # ---- audio tap (snippets for music recognition) --------------------
+        # Off unless tap_dir is set: then audio_tap.py sits in the loopback
+        # and writes the last tap_snippet_s seconds every tap_interval_s to
+        # tap_dir. Keep that on a tmpfs (/tmp, /dev/shm) -- not the SD card.
+        self._tap_dir = str(cfg.get("tap_dir", "")).strip()
+        self._tap_snippet_s = float(cfg.get("tap_snippet_s", 15.0))
+        self._tap_interval_s = float(cfg.get("tap_interval_s", 30.0))
+        self._tap_keep = int(cfg.get("tap_keep", 20))
 
         # ---- ADC front end --------------------------------------------------
         self._adc_setup = bool(cfg.get("adc_setup", True))
@@ -350,19 +360,28 @@ class TurntableProvider(SourceProvider):
         return 16 if "16" in self._format else 32
 
     def _pipeline(self) -> str:
-        """ADC -> [RIAA] -> DAC as a shell pipeline."""
+        """ADC -> [RIAA] -> [tap] -> DAC as a shell pipeline."""
         common = (f"-f {self._format} -r {self._rate} -c {self._channels}")
         period = f" --period-size={self._period}" if self._period else ""
-        rec = f"arecord -q -D {self._cap_dev} {common}{period}"
-        play = f"aplay -q -D {self._play_dev} {common}{period}"
-        if not self._riaa:
-            return f"{rec} | {play}"
-        riaa = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                            "riaa_stream.py")
-        filt = (f"python3 -u {riaa} --rate {self._rate} "
+        here = os.path.dirname(os.path.abspath(__file__))
+        stages = [f"arecord -q -D {self._cap_dev} {common}{period}"]
+        if self._riaa:
+            riaa = os.path.join(here, "riaa_stream.py")
+            stages.append(
+                f"python3 -u {riaa} --rate {self._rate} "
                 f"--channels {self._channels} --bits {self._bits()} "
                 f"--hp {self._riaa_hp} --gain-db {self._riaa_gain}")
-        return f"{rec} | {filt} | {play}"
+        if self._tap_dir:
+            # Last before the DAC: snippets are exactly what's heard.
+            tap = os.path.join(here, "audio_tap.py")
+            stages.append(
+                f"python3 -u {tap} --rate {self._rate} "
+                f"--channels {self._channels} --bits {self._bits()} "
+                f"--dir {shlex.quote(self._tap_dir)} "
+                f"--snippet-s {self._tap_snippet_s} "
+                f"--interval-s {self._tap_interval_s} --keep {self._tap_keep}")
+        stages.append(f"aplay -q -D {self._play_dev} {common}{period}")
+        return " | ".join(stages)
 
     def _start_audio(self) -> None:
         if not self._loopback:

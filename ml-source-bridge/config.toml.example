@@ -208,6 +208,19 @@ display_name = "N.RADIO"        # optional; up to 11 chars ASCII
 # riaa_gain_db     = 0.0    # fixed makeup gain (a live stream can't be
 #                           # peak-normalized the way a finished file is)
 #
+# ---- audio tap: snippets for music recognition -- OFF by default ----
+# Set tap_dir to have the loopback write the last tap_snippet_s seconds of
+# what's playing, every tap_interval_s, as a 16-bit mono WAV (~1.4 MB per
+# 15 s); only the newest tap_keep files are kept. Audio passes through
+# unchanged. Without tap_dir nothing extra runs and nothing is written.
+#
+# SD-card wear: keep tap_dir on a tmpfs (RAM) -- /tmp on Debian 13, or
+# /dev/shm. The tap logs a warning if it isn't.
+# tap_dir        = "/tmp/mdt-phono"
+# tap_snippet_s  = 15
+# tap_interval_s = 30
+# tap_keep       = 20
+#
 # ---- local controls on the deck ----
 # The deck's own PLAY / STANDBY buttons drive ML, not just the other way
 # round: it reports its state on DL'80, so pressing PLAY switches the ML
