@@ -7,9 +7,12 @@ Philip's work it adds:
 - **Sendspin** (e.g. Music Assistant) and **MPD** as audio providers
 - **several providers per B&O source** -- e.g. Sendspin and AirPlay sharing
   N.MUSIC, whoever starts last plays
+- **Music recognition for the turntable**: identifies what's on the record
+  via Shazam (shazamio) from the audio alone and shows title, artist, album
+  and cover -- optional, `recognize = true`
 - **Home Assistant integration**: the Pi reports what each source plays
-  (including AirPlay straight from an iPhone, with cover art), plus HA
-  automations and a dashboard card
+  (including AirPlay straight from an iPhone, with cover art, and the
+  recognized record), plus HA automations and one dashboard card for it all
 
 The full list of changes is in [CHANGES.md](CHANGES.md).
 
@@ -38,6 +41,7 @@ Receive and send any remote control messages or analog audio streams via MasterL
 | **LIGHT-key home automation** | Beo4 remote `LIGHT + <any key>` runs a user-configured shell command (Home Assistant call, MQTT publish, GPIO toggle, whatever). Not all ML devices can forward them - check if yours supports it beforehand | `ml-source-bridge/` (`[light_handler]`) |
 | **DL'80 turntable control** | Remote control your DL enabled BeoGram turntable | `dl-docs/dl80-beogram/`, `dl-scripts/dl80-turntable/` |
 | **Turntable as an ML source** | Play a DL'80 Beogram *through* your ML music system: pick the source on your Beo remote to start the record, Step Up/Down to skip tracks, and the analogue audio is looped ADC→DAC onto ML. Opt-in per source (typically N.RADIO), Feed it line level (its own preamp, or an external phono stage); the software RIAA + high ADC gain option is a dev-only path with poor sound quality. | `ml-source-bridge/` (`provider = "turntable"`) |
+| **Music recognition (turntable)** | Optional: identifies the record playing on the turntable source via Shazam (shazamio, unofficial client) from the audio alone -- a new track is detected from the silent gap -- and shows title / artist / album / cover on panels that display source texts and in Home Assistant. A result is shown only when two attempts agree. Nothing is written to disk. | `ml-source-bridge/` (`[turntable] recognize = true`) |
 | **DL'86 music-system control** | Remote control your DL enabled BeoCenter or BeoMaster turntable | `dl-docs/dl86-music-system/`, `dl-scripts/dl86-system/` |
 | **Phono capture (turntable)** | Sample script to do a 60 s record from a turntable into FLAC: triggers `BG.Play`, configures the ADC, records and optionally applies a software RIAA de-emphasis. | `dl-scripts/dl80-turntable/` |
 | **CD capture (music system)** | Sample script to do a 60 s record from a CD source: triggers DL'86 CD on, configures ADC, records, encodes FLAC and sends standby. | `dl-scripts/dl86-system/` |
