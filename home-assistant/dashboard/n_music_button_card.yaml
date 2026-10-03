@@ -5,15 +5,15 @@ show_icon: false
 show_state: false
 tap_action:
   action: more-info
-# Sichtbar, solange irgendetwas auf N.MUSIC spielt – MA oder ein Stream
-# direkt auf den Pi (AirPlay vom iPhone, ...), siehe sensor.n_music_quelle.
+# Visible while anything plays on N.MUSIC -- MA or a stream straight to
+# the Pi (AirPlay from an iPhone, ...), see sensor.n_music_quelle.
 visibility:
   - condition: state
     entity: sensor.n_music_quelle
     state_not: –
-# ext: true, wenn laut Pi (sensor.mdt_n_music) gerade ein anderer Provider
-# als Sendspin/MA spielt. Dann kommen Titel/Interpret vom Pi, und die
-# Buttons sind ausgeblendet (HA kann diese Provider nicht steuern).
+# ext: true while the Pi (sensor.mdt_n_music) reports a provider other
+# than Sendspin/MA playing. Title/artist/cover then come from the Pi, and
+# the buttons are hidden (HA can't control those providers).
 variables:
   ext: >
     [[[
@@ -112,7 +112,7 @@ styles:
     - color: white
     - background: >
         [[[
-          // Cover von MA oder – bei AirPlay & Co. – direkt vom Pi.
+          // Cover from MA or -- for AirPlay & co. -- straight from the Pi.
           const pic = variables.ext
             ? states['sensor.mdt_n_music'].attributes.cover_url
             : entity.attributes.entity_picture;

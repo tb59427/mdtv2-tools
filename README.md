@@ -1,9 +1,25 @@
 # TB version of mdtv2-tools
-This is a clone from Philip Voigt's great Masterlink Toolset MDTV2 (here's the gitlab repo: https://gitlab.com/masterdatatool/software/mdtv2-tools)
-I have started to experiment with a sendspin provider which this repo contains in addition to all of Philip's stuff. Still in experimental state. Also this repo contains changes to allow more than one streaming protocol per B&O source (e.g. sendspin and airplay for N.MUSIC)
 
-# Attention
-The installer is still Philip's original installer. When installing this repo you need to manually install and configure sendspin on the pi. Changing Philip's installer is still WIP.
+A fork of Philip Voigt's great Masterlink toolset MDTV2
+(<https://gitlab.com/masterdatatool/software/mdtv2-tools>). On top of
+Philip's work it adds:
+
+- **Sendspin** (e.g. Music Assistant) and **MPD** as audio providers
+- **several providers per B&O source** -- e.g. Sendspin and AirPlay sharing
+  N.MUSIC, whoever starts last plays
+- **Home Assistant integration**: the Pi reports what each source plays
+  (including AirPlay straight from an iPhone, with cover art), plus HA
+  automations and a dashboard card
+
+The full list of changes is in [CHANGES.md](CHANGES.md).
+
+**Docs for the additions:**
+[providers](docs/providers.md) (AirPlay, Sendspin, MPD, ALSA) ·
+[Home Assistant](docs/home-assistant.md) ·
+[testing a checkout on the Pi](docs/testing.md)
+
+`install.sh` sets up everything except Sendspin and MPD, which are installed
+by hand as described in [docs/providers.md](docs/providers.md).
 
 # mdtv2-tools
 
@@ -65,7 +81,7 @@ the broker.
 On a fresh Raspberry Pi OS Lite (Bookworm or later), one line:
 
 ```sh
-curl -sSL https://gitlab.com/masterdatatool/software/mdtv2-tools/-/raw/master/bootstrap.sh | sudo bash
+curl -sSL https://raw.githubusercontent.com/tb59427/mdtv2-tools/master/bootstrap.sh | sudo bash
 ```
 
 That installs git, clones the repo into `/opt/mdt-tools-src/`, then
@@ -77,13 +93,13 @@ venv). The installer may say `REBOOT REQUIRED` if it had to change
 If you'd rather inspect the script before piping it to bash:
 
 ```sh
-curl -sSL https://gitlab.com/masterdatatool/software/mdtv2-tools/-/raw/master/bootstrap.sh
+curl -sSL https://raw.githubusercontent.com/tb59427/mdtv2-tools/master/bootstrap.sh
 ```
 
 Or the manual two-step:
 
 ```sh
-git clone https://gitlab.com/masterdatatool/software/mdtv2-tools.git
+git clone https://github.com/tb59427/mdtv2-tools.git
 cd mdtv2-tools
 sudo ./install.sh
 ```
@@ -169,8 +185,8 @@ options and the complete Beo4 key name table.
 Systemd units land in `/etc/systemd/system/`; the bridge config lives
 at `/etc/ml-source-bridge.toml`; the shairport D-Bus policy lives at
 `/etc/dbus-1/system.d/shairport-sync-instance-policy.conf`. The
-`dl-docs/` reference material lives in the repo only — it isn't
-installed onto the Pi.
+`dl-docs/`, `docs/` and `home-assistant/` live in the repo only — they
+aren't installed onto the Pi.
 
 ## License
 

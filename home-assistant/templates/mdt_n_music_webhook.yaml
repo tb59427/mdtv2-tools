@@ -1,21 +1,21 @@
-# Trigger-Template-Sensor sensor.mdt_n_music: nimmt die Meldungen von
-# ha-notifier auf dem Pi entgegen (welcher Provider auf N.MUSIC spielt,
-# Titel/Interpret/Album). Gehört in configuration.yaml – die Oberfläche
-# kann keine Trigger-Sensoren anlegen.
+# Trigger template sensor sensor.mdt_n_music: receives what ha-notifier on
+# the Pi reports (which provider plays on N.MUSIC, title/artist/album,
+# cover). Goes into configuration.yaml -- the UI can't create trigger
+# sensors. See docs/home-assistant.md.
 #
 # secrets.yaml:
-#   mdt_nmusic_webhook: mdt-nmusic-<langer-zufallswert>
-# Dieselbe ID steht auf dem Pi in /etc/ml-source-bridge.toml unter
-# [ha_notifier] url = "http://<ha>:8123/api/webhook/<id>".
+#   mdt_nmusic_webhook: mdt-nmusic-<long-random-value>
+# The same id is in the Pi's /etc/ml-source-bridge.toml:
+#   [ha_notifier] url = "http://<ha>:8123/api/webhook/<id>"
 #
-# ha-notifier schickt nur die Quellen aus [ha_notifier] sources – dort
-# sources = ["N.MUSIC"] setzen, damit z. B. ein Plattenspieler auf N.RADIO
-# diesen Sensor nicht überschreibt.
+# ha-notifier only sends the sources in [ha_notifier] sources -- set
+# sources = ["N.MUSIC"] there, so e.g. a turntable on N.RADIO doesn't
+# overwrite this sensor.
 #
-# state: playing / paused / idle. Bei idle sind die Attribute leer.
-# cover_url: Cover vom Pi (http://<pi>.local:8099/cover/…), leer wenn keins.
-# Der Browser lädt es direkt vom Pi – funktioniert, solange HA per http im
-# LAN geöffnet wird (bei https blockiert der Browser das als Mixed Content).
+# state: playing / paused / idle; on idle the attributes are empty.
+# cover_url: cover served by the Pi (http://<pi>.local:8099/cover/…), empty
+# if none. The browser loads it straight from the Pi -- works while HA is
+# opened over http in the LAN (https would block it as mixed content).
 template:
   - trigger:
       - trigger: webhook
