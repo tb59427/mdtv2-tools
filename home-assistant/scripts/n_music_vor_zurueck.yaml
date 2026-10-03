@@ -1,0 +1,28 @@
+alias: N.MUSIC Vor/Zurück
+mode: queued
+fields:
+  richtung:
+    description: vor oder zurueck
+    required: true
+    selector:
+      select:
+        options:
+          - vor
+          - zurueck
+sequence:
+  - if:
+      - condition: state
+        entity_id: sensor.n_music_quelle
+        state: Internet Radio
+    then:
+      - action: >-
+          input_select.select_{{ 'next' if richtung == 'vor' else 'previous' }}
+        target:
+          entity_id: input_select.radio_station_list
+        data:
+          cycle: true
+    else:
+      - action: >-
+          media_player.media_{{ 'next' if richtung == 'vor' else 'previous' }}_track
+        target:
+          entity_id: media_player.masterlink_bridge_ma

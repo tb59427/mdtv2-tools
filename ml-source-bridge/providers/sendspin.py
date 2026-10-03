@@ -2,7 +2,7 @@
 
 Sendspin is the Open Home Foundation's synchronized multi-room audio
 protocol. On the Pi it runs as `sendspin daemon` (systemd) and pipes
-audio to the local default ALSA device, which -- in our case -- feeds
+audio to ALSA (`dmix`, shared with shairport-sync / MPD), which feeds
 the DAC that sits behind the Masterlink bus.
 
 D-Bus wiring, the fiddly bits:
@@ -14,9 +14,12 @@ D-Bus wiring, the fiddly bits:
     that user's session bus.
 
   * The session-bus socket is 0700 to the owner (`sendspin`); the
-    ml-source-bridge process (typically root or pi) cannot open it
-    directly. We wrap each dbus-send in `sudo -u <user> sh -c '…'`
-    with the right env vars. Cheap; no extra Python deps.
+    ml-source-bridge process (user `mdt`) cannot open it directly. We
+    run each dbus-send as that user via sudo, passing the session-bus
+    env vars on the sudo command line. Needs exactly this sudoers rule
+    (SETENV for the two vars; nothing but dbus-send is allowed):
+
+        mdt ALL=(sendspin) NOPASSWD:SETENV: /usr/bin/dbus-send
 
   * Sendspin's MPRIS name carries a per-PID suffix, e.g.
     `org.mpris.MediaPlayer2.Sendspin.instance59584`. This changes on
@@ -40,7 +43,7 @@ import time
 from typing import Optional
 
 from core.bus import log
-from providers.base import Metadata, SourceProvider
+from providers.base import Metadata, SourceProvider, mpris_state
 
 
 # ---------------------------------------------------------------------------
@@ -79,6 +82,8 @@ _ARTIST_RE = re.compile(
 _GENRE_RE  = re.compile(
     r'string "xesam:genre"\s+variant\s+array\s*\[\s*string "(.*?)"')
 
+_ART_RE    = re.compile(r'string "mpris:artUrl"\s+variant\s+string "(.*?)"')
+
 # `dbus-send ListNames` returns each name inside `string "..."`.
 _LIST_NAMES_RE = re.compile(r'string "(.*?)"')
 
@@ -107,6 +112,8 @@ class SendspinProvider(SourceProvider):
     name so this provider can stand in for N.MUSIC (0x7A), N.RADIO
     (0xA1), etc.
     """
+
+    provider_name = "sendspin"
 
     def __init__(self, source_byte: int, display_name: str) -> None:
         self.source_byte = source_byte
@@ -177,6 +184,10 @@ class SendspinProvider(SourceProvider):
         status = self._dbus_get_property("PlaybackStatus")
         return status == "Playing" if status is not None else False
 
+    def playback_state(self) -> str:
+        # MPRIS name vanishes when no stream is active -> None -> idle.
+        return mpris_state(self._dbus_get_property("PlaybackStatus"))
+
     def metadata(self) -> Optional[Metadata]:
         out = self._dbus_get_property_raw("Metadata")
         if not out:
@@ -194,13 +205,12 @@ class SendspinProvider(SourceProvider):
             genre  = genre.group(1)  if genre  else None,
         )
 
-    # ---- private: D-Bus plumbing on the user session bus -------------------
+    def art_url(self) -> Optional[str]:
+        out = self._dbus_get_property_raw("Metadata")
+        m = _ART_RE.search(out) if out else None
+        return (m.group(1) or None) if m else None
 
-    def _sudo_env_prefix(self) -> list[str]:
-        """`sudo -u sendspin sh -c '…'` wrapper. We use sh -c so the env
-        vars are set in the same process as dbus-send (a plain
-        `sudo -u user cmd` wouldn't propagate our env)."""
-        return ["sudo", "-u", _SENDSPIN_USER, "sh", "-c"]
+    # ---- private: D-Bus plumbing on the user session bus -------------------
 
     def _run_dbus_send(self, dbus_args: list[str],
                        timeout: float = 2.0) -> Optional[subprocess.CompletedProcess]:
@@ -209,18 +219,19 @@ class SendspinProvider(SourceProvider):
         subprocess exception."""
         if _SENDSPIN_UID is None:
             return None
-        # sh-quoting is fine here: we control every arg, none contain
-        # embedded single quotes.
-        quoted = " ".join(f"'{a}'" for a in dbus_args)
-        shell_cmd = (
-            f"XDG_RUNTIME_DIR={_XDG_RUNTIME} "
-            f"DBUS_SESSION_BUS_ADDRESS={_DBUS_ADDR} "
-            f"dbus-send {quoted}"
-        )
+        # VAR=value before the command: sudo sets them for dbus-send
+        # (allowed by SETENV in the sudoers rule). -n: fail instead of
+        # hanging on a password prompt if the rule is missing.
+        cmd = [
+            "sudo", "-n", "-u", _SENDSPIN_USER,
+            f"XDG_RUNTIME_DIR={_XDG_RUNTIME}",
+            f"DBUS_SESSION_BUS_ADDRESS={_DBUS_ADDR}",
+            "/usr/bin/dbus-send", *dbus_args,
+        ]
         try:
             return subprocess.run(
-                self._sudo_env_prefix() + [shell_cmd],
-                capture_output=True, text=True, timeout=timeout, check=False,
+                cmd, capture_output=True, text=True, timeout=timeout,
+                check=False,
             )
         except (subprocess.TimeoutExpired, FileNotFoundError) as e:
             log(f"[sendspin] dbus-send exec failed: {e}", err=True)

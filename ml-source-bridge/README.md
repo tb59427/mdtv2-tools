@@ -110,6 +110,44 @@ the system switches to that source. Two things bound it:
   Source Center), `"am"`, `"off"`, or any ML address such as `0x06` to aim
   it at a single link node. Only the VM and AM forms are capture-verified.
 
+## Now playing on redis
+
+The bridge publishes what each configured source is playing -- which
+provider owns it, playback state and track metadata -- so other
+processes can follow it without talking D-Bus / MPD themselves (e.g. to
+show a direct AirPlay stream from an iPhone in Home Assistant). Runs for
+both roles, independent of `auto_wake`; polled once a second, published
+only on change.
+
+```sh
+redis-cli HGETALL state:nowplaying          # current view, field = source byte
+redis-cli SUBSCRIBE link:ml:nowplaying      # one message per change
+```
+
+Payload (one source):
+
+```json
+{"source": "N.MUSIC", "source_byte": "0x7a",
+ "provider": "airplay", "display": "Apple Music",
+ "state": "playing", "title": "Theme from Harry's Game",
+ "artist": "Clannad", "album": "Magical Ring",
+ "art_url": "file:///tmp/shairport-sync/.cache/coverart/cover-….jpg"}
+```
+
+* `state` -- `playing`, `paused` (session held, e.g. paused on the iPhone)
+  or `idle` (AirPlay client gone, MA / MPD stopped, bridge shut down).
+  When `idle`, `provider`, `display` and the metadata fields are empty.
+  The turntable never reports `paused`.
+* `display` -- the provider's `[provider_displays]` entry, else the
+  source's `display_name`.
+* `art_url` -- cover art as the backend reports it (MPRIS `mpris:artUrl`):
+  for AirPlay a file in shairport-sync's `cover_art_cache_directory`, for
+  Sendspin whatever it puts there; empty for MPD and the turntable.
+* On a multi-provider source, a paused sub keeps the source until another
+  sub starts playing.
+* No timestamp: the same state always serialises to the same string, so
+  consumers can drop duplicates by comparison.
+
 ## Configuration
 
 `/etc/ml-source-bridge.toml` -- copied from `config.toml.example` on first

@@ -1,0 +1,18 @@
+alias: Masterlink Bridge Default-Lautstärke
+description: N.MUSIC Default Lautstärke
+triggers:
+  - trigger: state
+    entity_id: media_player.masterlink_bridge_ma
+    to: playing
+conditions:
+  - condition: template
+    value_template: >-
+      {{ trigger.from_state is not none and
+         trigger.from_state.state in ['idle', 'off', 'standby'] }}
+actions:
+  - action: media_player.volume_set
+    target:
+      entity_id: media_player.masterlink_bridge_ma
+    data:
+      volume_level: 0.3
+mode: single

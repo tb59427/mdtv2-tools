@@ -19,7 +19,7 @@
 #                                            our HAT is compatible with)
 #   3. Patches /boot/firmware/cmdline.txt to drop the serial console.
 #   4. Disables conflicting services (serial-getty, hciuart).
-#   5. Copies code to /opt/mdt-tools/{broker,ml-source-bridge,ml-debug,mcu-firmware}.
+#   5. Copies code to /opt/mdt-tools/{broker,ml-source-bridge,ml-debug,ha-notifier,mcu-firmware}.
 #   6. Installs systemd unit files + the shairport-sync D-Bus policy.
 #   7. Sets up a hidden pymcuprog venv at /opt/mdt-tools/.pymcuprog-venv/
 #      (used transparently by mcu-firmware/flash.sh).
@@ -227,7 +227,7 @@ RSYNC_OPTS=(-a --delete
     --exclude 'config.toml'
     --exclude '.pymcuprog-venv'
 )
-for d in broker ml-source-bridge ml-debug dl-debug state-tracker mcu-firmware; do
+for d in broker ml-source-bridge ml-debug dl-debug state-tracker ha-notifier mcu-firmware; do
     rsync "${RSYNC_OPTS[@]}" "$SOURCE_DIR/$d/" "$INSTALL_ROOT/$d/"
 done
 chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_ROOT"
@@ -238,7 +238,8 @@ ok "code synced"
 note "systemd unit files"
 for src_unit in "$SOURCE_DIR/broker/mdtv2-broker.service" \
                 "$SOURCE_DIR/ml-source-bridge/ml-source-bridge.service" \
-                "$SOURCE_DIR/state-tracker/mdt-state.service"; do
+                "$SOURCE_DIR/state-tracker/mdt-state.service" \
+                "$SOURCE_DIR/ha-notifier/ha-notifier.service"; do
     name=$(basename "$src_unit")
     dst="/etc/systemd/system/$name"
     if cmp -s "$src_unit" "$dst" 2>/dev/null; then
@@ -281,13 +282,51 @@ else
     warn "shairport policy file not found at $SRC_POLICY"
 fi
 
+# ---------- 7b. sudoers rule for the Sendspin provider ----------------------
+# The provider runs dbus-send as the `sendspin` user (its MPRIS lives on that
+# user's session bus). Only relevant if sendspin is installed -- see
+# docs/providers.md. Validated with visudo before it goes live: a broken
+# sudoers file would lock out sudo entirely.
+SENDSPIN_SUDOERS=/etc/sudoers.d/ml-source-bridge-sendspin-dbus
+SRC_SENDSPIN_SUDOERS="$SOURCE_DIR/ml-source-bridge/sudoers-sendspin"
+# Earlier setups allowed `mdt ALL=(sendspin) NOPASSWD: /usr/bin/sh`, i.e. any
+# command as sendspin. The provider no longer needs that.
+LEGACY_SENDSPIN_SUDOERS=/etc/sudoers.d/ml-source-bridge-sendspin
+if id sendspin >/dev/null 2>&1; then
+    if cmp -s "$SRC_SENDSPIN_SUDOERS" "$SENDSPIN_SUDOERS" 2>/dev/null; then
+        skip "sendspin sudoers rule already up to date"
+    elif visudo -cf "$SRC_SENDSPIN_SUDOERS" >/dev/null; then
+        install -m 440 -o root -g root "$SRC_SENDSPIN_SUDOERS" "$SENDSPIN_SUDOERS"
+        ok "installed $SENDSPIN_SUDOERS"
+    else
+        warn "$SRC_SENDSPIN_SUDOERS failed visudo -- not installed"
+    fi
+    if [[ -f $LEGACY_SENDSPIN_SUDOERS ]] \
+       && grep -qE '^mdt +ALL=\(sendspin\) +NOPASSWD: */usr/bin/sh *$' "$LEGACY_SENDSPIN_SUDOERS" \
+       && [[ -f $SENDSPIN_SUDOERS ]]; then
+        rm -f "$LEGACY_SENDSPIN_SUDOERS"
+        ok "removed legacy $LEGACY_SENDSPIN_SUDOERS (allowed any command as sendspin)"
+    fi
+else
+    skip "no sendspin user -- sudoers rule not needed"
+fi
+
 # ---------- 8. default config ------------------------------------------------
 if [[ -f $BRIDGE_TOML ]]; then
     skip "$BRIDGE_TOML already exists -- not touching"
 else
-    install -m 644 "$SOURCE_DIR/ml-source-bridge/config.toml.example" "$BRIDGE_TOML"
+    install -m 640 -o root -g "$SERVICE_USER" \
+        "$SOURCE_DIR/ml-source-bridge/config.toml.example" "$BRIDGE_TOML"
     NEED_CONFIG_EDIT=1
     ok "wrote default $BRIDGE_TOML (edit before enabling the service)"
+fi
+# The config can hold secrets (HA webhook URL, tokens in [light_handler]
+# commands): readable by root and the service user only. Applied on every
+# run so existing installs get tightened too.
+if [[ $(stat -c '%U:%G %a' "$BRIDGE_TOML") != "root:$SERVICE_USER 640" ]]; then
+    chown "root:$SERVICE_USER" "$BRIDGE_TOML"
+    chmod 640 "$BRIDGE_TOML"
+    ok "$BRIDGE_TOML -> root:$SERVICE_USER 0640"
 fi
 
 # ---------- 9. pymcuprog venv -----------------------------------------------
@@ -317,9 +356,10 @@ if (( NEED_SHAIRPORT_RESTART )); then
         || warn "couldn't restart shairport-sync"
 fi
 
-# Enable + start (or restart) both services. Fresh install: enable+now.
-# Update install: restart to pick up new code.
-for svc in mdtv2-broker.service ml-source-bridge.service mdt-state.service; do
+# Enable + start (or restart) the services. Fresh install: enable+now.
+# Update install: restart to pick up new code. ha-notifier exits right
+# away (and stays down) until [ha_notifier] is enabled in the config.
+for svc in mdtv2-broker.service ml-source-bridge.service mdt-state.service ha-notifier.service; do
     if systemctl is-enabled --quiet "$svc" 2>/dev/null; then
         note "restarting $svc"
         systemctl restart "$svc"
@@ -336,6 +376,9 @@ echo
 echo "  services: $(systemctl is-active mdtv2-broker.service 2>/dev/null) mdtv2-broker, $(systemctl is-active ml-source-bridge.service 2>/dev/null) ml-source-bridge, $(systemctl is-active mdt-state.service 2>/dev/null) mdt-state"
 echo "  logs:     sudo journalctl -u mdtv2-broker.service -u ml-source-bridge.service -u mdt-state.service -f"
 echo "  state:    redis-cli GET state:ml | state:dl80 | state:dl86"
+echo "            redis-cli HGETALL state:nowplaying"
+echo "  HA:       enable [ha_notifier] in /etc/ml-source-bridge.toml, then"
+echo "            sudo systemctl restart ha-notifier.service"
 if (( NEED_CONFIG_EDIT )); then
     echo
     echo "  /etc/ml-source-bridge.toml was created with default values --"

@@ -24,15 +24,17 @@ Usage:
     # Diagnostic dry-run -- log handler dispatch, never transmit
     ./ml_source_bridge.py --config /etc/ml-source-bridge.toml --dry-run
 
-Config file (TOML, see config.toml.example):
+Config file (TOML, see config.toml.example for every option):
     role           = "sc" | "am"
-    source_byte    = 0xA1     (or 0x7A, 0x8D, 0x6F, ...)
-    display_name   = "N.RADIO" (optional)
-    provider       = "airplay" | "turntable"
     broadcast_clock= true
     auto_wake      = true
     redis_host     = "localhost"
     redis_port     = 6379
+    [[sources]]                (one table per claimed source byte)
+    source_byte    = 0xA1     (or 0x7A, 0x8D, 0x6F, ...)
+    display_name   = "N.RADIO" (optional)
+    provider       = "airplay" | "sendspin" | "mpd" | "turntable"
+                     or a list, e.g. ["airplay", "sendspin"]
 """
 from __future__ import annotations
 
@@ -53,6 +55,7 @@ from core.bus import Bus, Periodic, detect_firmware_role, log
 from core.dispatcher import Context, Dispatcher
 from core import builders as B
 from core import logging_setup
+from core import nowplaying
 from core.light_handler import LightHandler
 from core.telegram import (
     SRC_CD, SRC_N_MUSIC, SRC_N_RADIO, SRC_RADIO, TT_REQUEST,
@@ -474,6 +477,7 @@ def main() -> int:
     # a MultiSourceProvider by make_provider(); from here it looks like
     # any other single provider.
     providers: dict[int, SourceProvider] = {}
+    source_displays: dict[int, str] = {}
     for entry in sources_list:
         src        = entry["source_byte"]
         pname      = entry.get("provider", "airplay")
@@ -488,6 +492,7 @@ def main() -> int:
             pname, src, display, cfg=cfg,
             provider_default=pdefault,
             redis_host=redis_host, redis_port=redis_port)
+        source_displays[src] = display
 
     log(f"[main] role={role.name} addr=0x{role.own_address:02x}  "
         f"redis={redis_host}:{redis_port}  "
@@ -562,6 +567,17 @@ def main() -> int:
                 interval_s=1.0, initial_delay_s=2.0,
                 stop=stop, name=f"watch-0x{src:02x}"))
 
+    # Now-playing publisher (state:nowplaying / link:ml:nowplaying), one
+    # per source. Runs for both roles and regardless of auto_wake.
+    nowplaying.reset(bus.r)
+    displays_map = cfg.get("provider_displays") or {}
+    for src, prov in providers.items():
+        threads.append(Periodic(
+            fn=nowplaying.publisher_factory(
+                bus.r, prov, source_displays[src], displays_map),
+            interval_s=1.0, initial_delay_s=3.0,
+            stop=stop, name=f"nowplaying-0x{src:02x}"))
+
     for th in threads:
         th.start()
 
@@ -613,6 +629,7 @@ def main() -> int:
                     f"src_dest=0x{t.src_dest:02x} from=0x{t.from_addr:02x}")
     finally:
         log("[main] shutting down")
+        stop.set()                  # also on an exception, not just signals
         if not args.dry_run:
             try:
                 bus.send(B.release(frm=role.own_address))
@@ -624,9 +641,13 @@ def main() -> int:
             except Exception as e:
                 log(f"[main] error stopping {prov.display_name!r}: {e}",
                     err=True)
-        bus.close()
         for th in threads:
             th.join(timeout=2.0)
+        # After the joins, so a publisher thread still finishing its
+        # last poll can't overwrite the idle state.
+        for src, prov in providers.items():
+            nowplaying.publish_idle(bus.r, prov, source_displays[src])
+        bus.close()
     return 0
 
 

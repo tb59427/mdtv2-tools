@@ -1,0 +1,20 @@
+[Unit]
+Description=mdt v2 Home Assistant notifier (now-playing -> HA webhook)
+Documentation=https://labs.polyvection.com/mdt
+Wants=redis-server.service ml-source-bridge.service
+After=network-online.target redis-server.service ml-source-bridge.service
+
+[Service]
+Type=simple
+# on-failure, not always: with [ha_notifier] disabled the daemon exits 0
+# on purpose and should stay down.
+Restart=on-failure
+RestartSec=5s
+# Reads redis and talks HTTP; needs neither serial nor audio.
+User=mdt
+Group=mdt
+WorkingDirectory=/opt/mdt-tools/ha-notifier
+ExecStart=/usr/bin/python3 -u /opt/mdt-tools/ha-notifier/ha_notifier.py --config /etc/ml-source-bridge.toml
+
+[Install]
+WantedBy=multi-user.target

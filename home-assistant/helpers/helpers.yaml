@@ -1,0 +1,14 @@
+# Reference: these helpers were created in the HA UI.
+# Documentation only -- do NOT also load this in configuration.yaml, or the
+# entities exist twice.
+
+input_text:
+  radio_default_station:
+    name: Radio Default Station
+    max: 255
+  n_music_inhalt:
+    name: n_music_inhalt
+    max: 255
+
+# input_select.radio_station_list exists as well (its options are set from
+# the MA favourites by the fill automation via input_select.set_options).

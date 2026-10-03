@@ -24,6 +24,25 @@ class Metadata:
     genre: Optional[str] = None     # MPRIS xesam:genre (first entry)
 
 
+# Playback states reported by SourceProvider.playback_state(). Coarser
+# than is_playing() on purpose: "paused" keeps the track on screen,
+# "idle" means the session is gone (AirPlay client disconnected, MA
+# stopped, MPD stopped).
+STATE_PLAYING = "playing"
+STATE_PAUSED  = "paused"
+STATE_IDLE    = "idle"
+
+
+def mpris_state(status: Optional[str]) -> str:
+    """Map an MPRIS PlaybackStatus ('Playing' / 'Paused' / 'Stopped' /
+    None when the player isn't reachable) onto our playback states."""
+    if status == "Playing":
+        return STATE_PLAYING
+    if status == "Paused":
+        return STATE_PAUSED
+    return STATE_IDLE
+
+
 class SourceProvider(ABC):
     """One audio backend. Lifecycle:
         __init__ -> start (when the bus says we should be active) -> ...
@@ -35,6 +54,10 @@ class SourceProvider(ABC):
 
     #: Short printable name shown on B&O displays. Max 12 chars.
     display_name: str = "?"
+
+    #: Config name of the backend ("airplay", "sendspin", …). Keys the
+    #: [provider_displays] table and the now-playing payload.
+    provider_name: str = "?"
 
     # ---- lifecycle ---------------------------------------------------------
 
@@ -68,6 +91,19 @@ class SourceProvider(ABC):
     @abstractmethod
     def is_playing(self) -> bool: ...
 
+    def playback_state(self) -> str:
+        """STATE_PLAYING / STATE_PAUSED / STATE_IDLE. Default: derived
+        from is_playing(), i.e. never 'paused'. Providers that can tell
+        a pause from a finished session override this."""
+        return STATE_PLAYING if self.is_playing() else STATE_IDLE
+
     def metadata(self) -> Optional[Metadata]:
         """Best-effort current metadata. May return None if unknown."""
+        return None
+
+    def art_url(self) -> Optional[str]:
+        """Cover art of the current track as reported by the backend --
+        a file:// path (shairport-sync's cover cache) or an http(s) URL.
+        None if unknown. Kept out of metadata() so the B&O display path,
+        which polls that every second, doesn't pay for it."""
         return None

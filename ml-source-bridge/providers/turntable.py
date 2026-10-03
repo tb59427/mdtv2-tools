@@ -127,6 +127,8 @@ def _pga_reg(db: float) -> int:
 
 
 class TurntableProvider(SourceProvider):
+    provider_name = "turntable"
+
     def __init__(self, *, source_byte: int, display_name: str,
                  cfg: Optional[dict] = None,
                  redis_host: str = "localhost",

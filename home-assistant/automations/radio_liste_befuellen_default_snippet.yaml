@@ -1,0 +1,11 @@
+- if:
+    - condition: template
+      value_template: >-
+        {{ states('input_text.radio_default_station')
+           in state_attr('input_select.radio_station_list', 'options') }}
+  then:
+    - action: input_select.select_option
+      target:
+        entity_id: input_select.radio_station_list
+      data:
+        option: "{{ states('input_text.radio_default_station') }}"

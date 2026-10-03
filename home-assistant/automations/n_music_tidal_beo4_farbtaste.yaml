@@ -1,0 +1,37 @@
+alias: N.MUSIC Tidal-Playlist per Beo4-Farbtaste
+description: Beo4 N.MUSIC + Farbtaste spielt Tidal-Playlist (Shuffle)
+triggers:
+  - trigger: event
+    event_type: mlgw.ML_telegram
+    event_data:
+      payload_type: BEO4_KEY
+variables:
+  playlists:
+    Yellow: TIDAL's Top Hits
+    Red: <Playlist 2>
+    Green: <Playlist 3>
+    Blue: <Playlist 4>
+  taste: "{{ trigger.event.data.payload.command }}"
+conditions:
+  - condition: template
+    value_template: >-
+      {{ trigger.event.data.payload.source == 'N.MUSIC'
+         and taste in playlists }}
+actions:
+  - action: input_text.set_value
+    target:
+      entity_id: input_text.n_music_inhalt
+    data:
+      value: "{{ playlists[taste] }}"
+  - action: media_player.shuffle_set
+    target:
+      entity_id: media_player.masterlink_bridge_ma
+    data:
+      shuffle: true
+  - action: music_assistant.play_media
+    target:
+      entity_id: media_player.masterlink_bridge_ma
+    data:
+      media_type: playlist
+      media_id: "{{ playlists[taste] }}"
+mode: queued

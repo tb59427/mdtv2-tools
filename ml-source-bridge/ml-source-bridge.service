@@ -16,6 +16,9 @@ RestartSec=1s
 # naturally because both run as 'mdt'.
 User=mdt
 Group=audio
+# Group=audio replaces mdt's own group; keep it so the bridge can read
+# /etc/ml-source-bridge.toml (root:mdt 0640).
+SupplementaryGroups=mdt
 WorkingDirectory=/opt/mdt-tools/ml-source-bridge
 ExecStart=/usr/bin/python3 -u /opt/mdt-tools/ml-source-bridge/ml_source_bridge.py --config /etc/ml-source-bridge.toml
 

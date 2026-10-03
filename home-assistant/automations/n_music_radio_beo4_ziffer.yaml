@@ -1,0 +1,26 @@
+alias: N.MUSIC Radio per Beo4-Ziffer
+description: Beo4 N.MUSIC + Ziffer wählt Radiostation
+triggers:
+  - trigger: event
+    event_type: mlgw.ML_telegram
+    event_data:
+      payload_type: BEO4_KEY
+variables:
+  stationen:
+    Digit-0: SWR 3 (128 kbits mp3)
+    Digit-1: <Station 2>
+    Digit-2: <Station 3>
+    Digit-3: <Station 4>
+    Digit-4: <Station 5>
+    Digit-5: <Station 6>
+  taste: "{{ trigger.event.data.payload.command }}"
+conditions:
+  - condition: template
+    value_template: >-
+      {{ trigger.event.data.payload.source == 'N.MUSIC'
+         and taste in stationen }}
+actions:
+  - action: script.radio_station_wahlen
+    data:
+      station: "{{ stationen[taste] }}"
+mode: queued
