@@ -92,6 +92,38 @@ Both are off by default. Note they only work as a pair: a bare cartridge
 needs the gain *and* the curve, so enabling one without the other gives
 either silence or a wrong tonal balance.
 
+#### Music recognition (optional)
+
+With `recognize = true` in `[turntable]` the bridge identifies the record
+via Shazam and shows title / artist / album on the B&O display; the cover
+goes wherever now-playing goes (e.g. the Home Assistant card). It works on
+the audio alone -- no Datalink cable needed:
+
+* `audio_tap.py` sits in the ADC -> DAC loopback, forwards every byte
+  unchanged, and hands a copy to a worker process (dropped, never delayed,
+  if the worker falls behind).
+* The worker detects new tracks from silent gaps (below -50 dBFS for
+  1.5 s -- the groove between tracks, a record change), then asks Shazam
+  about ~10 s of the track (`phono_recognize.py`, in a helper process).
+* A result is shown only when two attempts ~10 s apart agree -- rare
+  tracks occasionally produce one-off false matches. No match: retries
+  with backoff; the display keeps `metadata_title`. Edition suffixes like
+  "(2016 Remaster)" are stripped from album names.
+* Results travel over redis pub/sub (`link:phono:recognized`); nothing is
+  written to disk.
+
+In tests with recordings from a Beogram 7000, mainstream pop/rock was
+recognized in every snippet (shown ~20 s after a track starts), while a
+jazz record wasn't in Shazam's catalog and produced one false match that
+the agreement rule filters out. Shazam's coverage decides.
+
+shazamio is an **unofficial** Shazam client and can break when Shazam
+changes its API. `install.sh` installs it into
+`/opt/mdt-tools/.recognize-venv` only when `recognize = true`, so enable it
+first, then re-run `install.sh`. The ha-notifier forwards only the sources
+in `[ha_notifier] sources` -- the turntable's source isn't in the shipped
+HA setup.
+
 ## Auto-wake
 
 When a provider's stream starts, the SC injects a virtual Beo4 keypress so

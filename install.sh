@@ -226,6 +226,7 @@ RSYNC_OPTS=(-a --delete
     --exclude '.DS_Store'
     --exclude 'config.toml'
     --exclude '.pymcuprog-venv'
+    --exclude '.recognize-venv'
 )
 for d in broker ml-source-bridge ml-debug dl-debug state-tracker ha-notifier mcu-firmware; do
     rsync "${RSYNC_OPTS[@]}" "$SOURCE_DIR/$d/" "$INSTALL_ROOT/$d/"
@@ -339,6 +340,31 @@ if [[ ! -x $PYMCUPROG_VENV/bin/pymcuprog ]]; then
     ok "pymcuprog installed"
 else
     skip "pymcuprog venv already present"
+fi
+
+# ---------- 9b. music recognition venv (opt-in) ------------------------------
+# Only when [turntable] recognize = true: shazamio (an unofficial Shazam
+# client) isn't packaged for Debian, so it gets its own venv; numpy and
+# redis come from the system packages.
+RECOGNIZE_VENV="$INSTALL_ROOT/.recognize-venv"
+if python3 - "$BRIDGE_TOML" <<'PY' 2>/dev/null
+import sys, tomllib
+cfg = tomllib.load(open(sys.argv[1], "rb"))
+sys.exit(0 if (cfg.get("turntable") or {}).get("recognize") else 1)
+PY
+then
+    note "music recognition venv ($RECOGNIZE_VENV)"
+    if "$RECOGNIZE_VENV/bin/python" -c "import shazamio" 2>/dev/null; then
+        skip "shazamio already installed"
+    else
+        python3 -m venv --system-site-packages "$RECOGNIZE_VENV"
+        "$RECOGNIZE_VENV/bin/pip" install --quiet --disable-pip-version-check \
+            "shazamio==0.8.1" 'audioop-lts; python_version >= "3.13"'
+        chown -R "$SERVICE_USER:$SERVICE_USER" "$RECOGNIZE_VENV"
+        ok "shazamio installed"
+    fi
+else
+    skip "music recognition off ([turntable] recognize) -- no venv"
 fi
 
 # ---------- 10. reloads ------------------------------------------------------

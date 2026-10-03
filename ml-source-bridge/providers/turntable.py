@@ -47,6 +47,7 @@ findings are worth knowing:
 """
 from __future__ import annotations
 
+import json
 import os
 import shlex
 import shutil
@@ -60,6 +61,7 @@ import redis
 
 from core.bus import log
 from providers.base import Metadata, SourceProvider
+from providers.phono_recognize import RECOGNIZED_CHAN
 
 DL80_TX = "link:dl80:transmit"
 DL80_RX = "link:dl80:receive"
@@ -158,10 +160,19 @@ class TurntableProvider(SourceProvider):
         self._riaa_hp = float(cfg.get("riaa_highpass_hz", 30.0))
         self._riaa_gain = float(cfg.get("riaa_gain_db", 0.0))
 
-        # ---- audio tap (snippets for music recognition) --------------------
-        # Off unless tap_dir is set: then audio_tap.py sits in the loopback
-        # and writes the last tap_snippet_s seconds every tap_interval_s to
-        # tap_dir. Keep that on a tmpfs (/tmp, /dev/shm) -- not the SD card.
+        # ---- audio tap: music recognition / test snippets -----------------
+        # Both off by default; either puts audio_tap.py into the loopback.
+        # recognize: identify the record via Shazam (shazamio, in its own
+        # venv) and show title/artist/album/cover. tap_dir: write snippets
+        # for tests -- keep it on a tmpfs (/tmp, /dev/shm), not the SD card.
+        self._recognize = bool(cfg.get("recognize", False))
+        self._recognize_py = str(cfg.get(
+            "recognize_python", "/opt/mdt-tools/.recognize-venv/bin/python"))
+        self._recognize_s = float(cfg.get("recognize_snippet_s", 10.0))
+        self._silence_db = float(cfg.get("recognize_silence_db", -50.0))
+        self._redis_host, self._redis_port = redis_host, redis_port
+        # Latest confirmed recognition while the loopback runs, else None.
+        self._recognized: Optional[dict] = None
         self._tap_dir = str(cfg.get("tap_dir", "")).strip()
         self._tap_snippet_s = float(cfg.get("tap_snippet_s", 15.0))
         self._tap_interval_s = float(cfg.get("tap_interval_s", 30.0))
@@ -265,10 +276,20 @@ class TurntableProvider(SourceProvider):
         """A record player knows nothing about what's on the record, but the
         B&O front panel still wants *something* -- without it the display
         keeps the role's "Connecting" placeholder. So we report a fixed
-        title (default "PHONO", set `metadata_title` to change it)."""
+        title (default "PHONO", set `metadata_title` to change it) -- or,
+        with recognize = true, what the music recognition confirmed."""
+        rec = self._recognized
+        if rec:
+            return Metadata(title=rec.get("title") or self._title,
+                            artist=rec.get("artist", ""),
+                            album=rec.get("album", ""), genre="")
         if not self._title:
             return None
         return Metadata(title=self._title, artist="", album="", genre="")
+
+    def art_url(self) -> Optional[str]:
+        rec = self._recognized
+        return (rec.get("cover_url") or None) if rec else None
 
     # ---- DL'80 plumbing ----------------------------------------------------
 
@@ -296,7 +317,7 @@ class TurntableProvider(SourceProvider):
             try:
                 if ps is None:
                     ps = self._r.pubsub()
-                    ps.subscribe(DL80_RX)
+                    ps.subscribe(DL80_RX, RECOGNIZED_CHAN)
                 m = ps.get_message(timeout=0.5,
                                    ignore_subscribe_messages=True)
                 if m is None:
@@ -304,6 +325,12 @@ class TurntableProvider(SourceProvider):
                 data = m.get("data")
                 if isinstance(data, bytes):
                     data = data.decode("utf-8", "replace")
+                chan = m.get("channel")
+                if isinstance(chan, bytes):
+                    chan = chan.decode()
+                if chan == RECOGNIZED_CHAN:
+                    self._on_recognized(str(data))
+                    continue
                 try:
                     op = int(str(data).strip(), 16) & 0xFF
                 except ValueError:
@@ -330,6 +357,22 @@ class TurntableProvider(SourceProvider):
         if ps is not None:
             try: ps.close()
             except Exception: pass
+
+    def _on_recognized(self, raw: str) -> None:
+        """Result from the tap's recognizer (link:phono:recognized). Only
+        taken while our loopback runs -- a stale message after a stop must
+        not resurrect a title."""
+        try:
+            msg = json.loads(raw)
+        except ValueError:
+            return
+        if self._proc is None:
+            return
+        if msg.get("state") == "confirmed":
+            self._recognized = {k: str(msg.get(k) or "") for k in
+                                ("title", "artist", "album", "cover_url")}
+        else:
+            self._recognized = None
 
     # ---- ADC front end -----------------------------------------------------
 
@@ -371,15 +414,28 @@ class TurntableProvider(SourceProvider):
                 f"python3 -u {riaa} --rate {self._rate} "
                 f"--channels {self._channels} --bits {self._bits()} "
                 f"--hp {self._riaa_hp} --gain-db {self._riaa_gain}")
-        if self._tap_dir:
-            # Last before the DAC: snippets are exactly what's heard.
+        recognize = self._recognize
+        if recognize and not os.access(self._recognize_py, os.X_OK):
+            log(f"[tt] recognize = true but {self._recognize_py} is missing "
+                f"-- re-run install.sh; music recognition off", err=True)
+            recognize = False
+        if recognize or self._tap_dir:
+            # Last before the DAC: it analyses exactly what's heard.
             tap = os.path.join(here, "audio_tap.py")
-            stages.append(
-                f"python3 -u {tap} --rate {self._rate} "
-                f"--channels {self._channels} --bits {self._bits()} "
-                f"--dir {shlex.quote(self._tap_dir)} "
-                f"--snippet-s {self._tap_snippet_s} "
-                f"--interval-s {self._tap_interval_s} --keep {self._tap_keep}")
+            py = self._recognize_py if recognize else "python3"
+            cmd = (f"{py} -u {tap} --rate {self._rate} "
+                   f"--channels {self._channels} --bits {self._bits()}")
+            if recognize:
+                cmd += (f" --recognize --recognize-s {self._recognize_s}"
+                        f" --silence-db {self._silence_db}"
+                        f" --redis-host {shlex.quote(str(self._redis_host))}"
+                        f" --redis-port {int(self._redis_port)}")
+            if self._tap_dir:
+                cmd += (f" --dir {shlex.quote(self._tap_dir)}"
+                        f" --snippet-s {self._tap_snippet_s}"
+                        f" --interval-s {self._tap_interval_s}"
+                        f" --keep {self._tap_keep}")
+            stages.append(cmd)
         stages.append(f"aplay -q -D {self._play_dev} {common}{period}")
         return " | ".join(stages)
 
@@ -400,6 +456,11 @@ class TurntableProvider(SourceProvider):
                 log(f"[tt] failed to start audio loopback: {e}", err=True)
                 self._proc = None
                 return
+            self._recognized = None
+            # Read stderr as it comes: the tap reports gaps / recognitions
+            # there, and an unread pipe would eventually block it.
+            threading.Thread(target=self._pump_stderr, args=(self._proc,),
+                             name="tt-loopback-stderr", daemon=True).start()
         log(f"[tt] audio loopback up: {cmd}")
 
     def _stop_audio(self) -> None:
@@ -415,11 +476,19 @@ class TurntableProvider(SourceProvider):
                 os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
         except (ProcessLookupError, PermissionError):
             pass
-        # Surface why it died if it wasn't us (bad device name, busy card).
-        try:
-            err = (proc.stderr.read() or b"").decode("utf-8", "replace").strip()
-        except Exception:
-            err = ""
-        if err:
-            log(f"[tt] loopback stderr: {err.splitlines()[-1]}", err=True)
+        self._recognized = None
         log("[tt] audio loopback down")
+
+    @staticmethod
+    def _pump_stderr(proc: subprocess.Popen) -> None:
+        """Forward the loopback's stderr to our log until it exits: tap
+        messages as info, anything else (bad device name, busy card) as an
+        error."""
+        for raw in iter(proc.stderr.readline, b""):
+            line = raw.decode("utf-8", "replace").rstrip()
+            if not line:
+                continue
+            if line.startswith("[tap]"):
+                log(f"[tt] {line}")
+            else:
+                log(f"[tt] loopback stderr: {line}", err=True)
