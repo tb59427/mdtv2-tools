@@ -282,6 +282,35 @@ else
     warn "shairport policy file not found at $SRC_POLICY"
 fi
 
+# ---------- 7b. sudoers rule for the Sendspin provider ----------------------
+# The provider runs dbus-send as the `sendspin` user (its MPRIS lives on that
+# user's session bus). Only relevant if sendspin is installed -- see
+# docs/providers.md. Validated with visudo before it goes live: a broken
+# sudoers file would lock out sudo entirely.
+SENDSPIN_SUDOERS=/etc/sudoers.d/ml-source-bridge-sendspin-dbus
+SRC_SENDSPIN_SUDOERS="$SOURCE_DIR/ml-source-bridge/sudoers-sendspin"
+# Earlier setups allowed `mdt ALL=(sendspin) NOPASSWD: /usr/bin/sh`, i.e. any
+# command as sendspin. The provider no longer needs that.
+LEGACY_SENDSPIN_SUDOERS=/etc/sudoers.d/ml-source-bridge-sendspin
+if id sendspin >/dev/null 2>&1; then
+    if cmp -s "$SRC_SENDSPIN_SUDOERS" "$SENDSPIN_SUDOERS" 2>/dev/null; then
+        skip "sendspin sudoers rule already up to date"
+    elif visudo -cf "$SRC_SENDSPIN_SUDOERS" >/dev/null; then
+        install -m 440 -o root -g root "$SRC_SENDSPIN_SUDOERS" "$SENDSPIN_SUDOERS"
+        ok "installed $SENDSPIN_SUDOERS"
+    else
+        warn "$SRC_SENDSPIN_SUDOERS failed visudo -- not installed"
+    fi
+    if [[ -f $LEGACY_SENDSPIN_SUDOERS ]] \
+       && grep -qE '^mdt +ALL=\(sendspin\) +NOPASSWD: */usr/bin/sh *$' "$LEGACY_SENDSPIN_SUDOERS" \
+       && [[ -f $SENDSPIN_SUDOERS ]]; then
+        rm -f "$LEGACY_SENDSPIN_SUDOERS"
+        ok "removed legacy $LEGACY_SENDSPIN_SUDOERS (allowed any command as sendspin)"
+    fi
+else
+    skip "no sendspin user -- sudoers rule not needed"
+fi
+
 # ---------- 8. default config ------------------------------------------------
 if [[ -f $BRIDGE_TOML ]]; then
     skip "$BRIDGE_TOML already exists -- not touching"

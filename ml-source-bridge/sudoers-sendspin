@@ -1,0 +1,11 @@
+# Installed by install.sh as /etc/sudoers.d/ml-source-bridge-sendspin-dbus
+# (only if a `sendspin` user exists).
+#
+# ml-source-bridge's Sendspin provider reads sendspin's MPRIS state on that
+# user's session bus: dbus-send only, SETENV for XDG_RUNTIME_DIR and
+# DBUS_SESSION_BUS_ADDRESS. Nothing else may run as sendspin.
+mdt ALL=(sendspin) NOPASSWD:SETENV: /usr/bin/dbus-send
+
+# Polled several times a second -- keep these calls out of the journal.
+Defaults:mdt !pam_session
+Defaults!/usr/bin/dbus-send !log_allowed
