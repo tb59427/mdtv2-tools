@@ -60,7 +60,10 @@ if [[ -d "$SRC_DIR/.git" ]]; then
             || git -C "$SRC_DIR" remote add origin "$REPO_URL"
     fi
     git -C "$SRC_DIR" fetch --quiet origin "$BRANCH"
-    git -C "$SRC_DIR" checkout --quiet "$BRANCH"
+    # --force: a plain checkout refuses when the clone has local edits or
+    # untracked files in the way (e.g. on another branch); they're
+    # discarded anyway. -B (re)points the local branch at origin/$BRANCH.
+    git -C "$SRC_DIR" checkout --quiet --force -B "$BRANCH" "origin/$BRANCH"
     git -C "$SRC_DIR" reset --hard --quiet "origin/$BRANCH"
 else
     note "cloning $REPO_URL (branch: $BRANCH) -> $SRC_DIR"
