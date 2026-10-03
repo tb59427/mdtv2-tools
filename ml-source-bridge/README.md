@@ -187,12 +187,16 @@ Payload (one source):
 ## Configuration
 
 `/etc/ml-source-bridge.toml` -- copied from `config.toml.example` on first
-install. Key fields:
+install; that file documents every option. Key fields:
 
 * `role` -- `sc` (source center) or `am` (audio master)
-* `[[sources]]` -- one block per provider. For each: `byte` (ML source byte,
-  e.g. `0xa1` = N.RADIO), `display_name` (12-char string shown on B&O
-  displays), `provider` (`airplay` etc.).
+* `[[sources]]` -- one table per ML source byte: `source_byte` (e.g. `0xA1`
+  = N.RADIO), `display_name` (shown on B&O panels), `provider` (`airplay`,
+  `sendspin`, `mpd`, `turntable`, or a list of them -- see multi-stream)
+* `[provider_displays]`, `[mpd]`, `[turntable]`, `[light_handler]`,
+  `[ha_notifier]` -- per feature
+
+Examples for each: [main README, Configuration](../README.md#configuration).
 
 ## Logs
 
