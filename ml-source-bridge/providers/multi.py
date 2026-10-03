@@ -91,9 +91,8 @@ class MultiSourceProvider(SourceProvider):
         # None. Lets the now-playing publisher report a paused AirPlay
         # session as "paused" (with its track) instead of "idle".
         self._last_idx: Optional[int] = None
-        # Diagnostic: last playing-set signature we logged, so we only
-        # log per transition instead of per poll. Temporary aid for
-        # tracking sub-switch behaviour on the real bridge.
+        # Last playing-set signature we logged, so the handover log below
+        # fires per transition instead of per poll.
         self._last_logged_playing: Optional[tuple[int, ...]] = None
         # Own poll thread: keeps _active_idx current independent of the
         # bridge's stream-watcher, which is gated on auto_wake. Started

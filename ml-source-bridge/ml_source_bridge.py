@@ -24,15 +24,17 @@ Usage:
     # Diagnostic dry-run -- log handler dispatch, never transmit
     ./ml_source_bridge.py --config /etc/ml-source-bridge.toml --dry-run
 
-Config file (TOML, see config.toml.example):
+Config file (TOML, see config.toml.example for every option):
     role           = "sc" | "am"
-    source_byte    = 0xA1     (or 0x7A, 0x8D, 0x6F, ...)
-    display_name   = "N.RADIO" (optional)
-    provider       = "airplay" | "turntable"
     broadcast_clock= true
     auto_wake      = true
     redis_host     = "localhost"
     redis_port     = 6379
+    [[sources]]                (one table per claimed source byte)
+    source_byte    = 0xA1     (or 0x7A, 0x8D, 0x6F, ...)
+    display_name   = "N.RADIO" (optional)
+    provider       = "airplay" | "sendspin" | "mpd" | "turntable"
+                     or a list, e.g. ["airplay", "sendspin"]
 """
 from __future__ import annotations
 

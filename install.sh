@@ -286,9 +286,18 @@ fi
 if [[ -f $BRIDGE_TOML ]]; then
     skip "$BRIDGE_TOML already exists -- not touching"
 else
-    install -m 644 "$SOURCE_DIR/ml-source-bridge/config.toml.example" "$BRIDGE_TOML"
+    install -m 640 -o root -g "$SERVICE_USER" \
+        "$SOURCE_DIR/ml-source-bridge/config.toml.example" "$BRIDGE_TOML"
     NEED_CONFIG_EDIT=1
     ok "wrote default $BRIDGE_TOML (edit before enabling the service)"
+fi
+# The config can hold secrets (HA webhook URL, tokens in [light_handler]
+# commands): readable by root and the service user only. Applied on every
+# run so existing installs get tightened too.
+if [[ $(stat -c '%U:%G %a' "$BRIDGE_TOML") != "root:$SERVICE_USER 640" ]]; then
+    chown "root:$SERVICE_USER" "$BRIDGE_TOML"
+    chmod 640 "$BRIDGE_TOML"
+    ok "$BRIDGE_TOML -> root:$SERVICE_USER 0640"
 fi
 
 # ---------- 9. pymcuprog venv -----------------------------------------------
