@@ -1,0 +1,16 @@
+{% set p = 'media_player.masterlink_bridge_ma' %}
+{% set m = 'sensor.mdt_n_music' %}
+{% set prov = state_attr(m, 'provider') or '' %}
+{% set id = state_attr(p, 'media_content_id') or '' %}
+{% set pl = states('input_text.n_music_inhalt') %}
+{% if is_state(m, 'playing') and prov not in ['', 'sendspin'] %}
+  {{ state_attr(m, 'album') or '–' }}
+{% elif not is_state(p, 'playing') %}
+  –
+{% elif '://radio' in id %}
+  {{ state_attr(p, 'media_album_name') }}
+{% elif pl not in ['', 'unknown', 'unavailable'] %}
+  {{ pl }}
+{% else %}
+  –
+{% endif %}

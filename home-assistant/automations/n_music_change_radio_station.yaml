@@ -1,0 +1,26 @@
+alias: N.MUSIC change Radio Station
+description: ''
+triggers:
+  - trigger: state
+    entity_id: input_select.radio_station_list
+    to: null
+    not_from:
+      - unknown
+      - unavailable
+conditions:
+  - condition: template
+    value_template: >-
+      {{ trigger.from_state.attributes.options ==
+         trigger.to_state.attributes.options }}
+  - condition: state
+    entity_id: automation.radio_liste_befuellen
+    attribute: current
+    state: 0
+actions:
+  - action: music_assistant.play_media
+    target:
+      entity_id: media_player.masterlink_bridge_ma
+    data:
+      media_type: radio
+      media_id: "{{ states('input_select.radio_station_list') }}"
+mode: single

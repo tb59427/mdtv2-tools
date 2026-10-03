@@ -1,0 +1,25 @@
+alias: Radio Station wählen
+mode: queued
+fields:
+  station:
+    description: Name der Station (wie in input_select.radio_station_list)
+    required: true
+    selector:
+      text:
+sequence:
+  - if:
+      - condition: template
+        value_template: "{{ is_state('input_select.radio_station_list', station) }}"
+    then:
+      - action: music_assistant.play_media
+        target:
+          entity_id: media_player.masterlink_bridge_ma
+        data:
+          media_type: radio
+          media_id: "{{ station }}"
+    else:
+      - action: input_select.select_option
+        target:
+          entity_id: input_select.radio_station_list
+        data:
+          option: "{{ station }}"

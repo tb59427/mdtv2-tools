@@ -1,0 +1,14 @@
+# Referenz: Diese Helfer wurden über die HA-Oberfläche angelegt.
+# Nur zur Dokumentation – NICHT zusätzlich in configuration.yaml laden,
+# sonst entstehen doppelte Entities.
+
+input_text:
+  radio_default_station:
+    name: Radio Default Station
+    max: 255
+  n_music_inhalt:
+    name: n_music_inhalt
+    max: 255
+
+# input_select.radio_station_list existiert ebenfalls (Optionen werden von der
+# Befüllungs-Automatisierung per input_select.set_options aus den MA-Favoriten gesetzt).

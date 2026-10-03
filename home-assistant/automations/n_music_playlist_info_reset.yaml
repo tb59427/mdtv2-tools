@@ -1,0 +1,18 @@
+alias: N.MUSIC Playlist-Info zurücksetzen
+triggers:
+  - trigger: state
+    entity_id: media_player.masterlink_bridge_ma
+    from: playing
+    for:
+      minutes: 2
+  - trigger: state
+    entity_id: input_select.radio_station_list
+    to: null
+conditions: []
+actions:
+  - action: input_text.set_value
+    target:
+      entity_id: input_text.n_music_inhalt
+    data:
+      value: ""
+mode: single

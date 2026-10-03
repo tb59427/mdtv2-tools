@@ -1,0 +1,18 @@
+{% set p = 'media_player.masterlink_bridge_ma' %}
+{% set m = 'sensor.mdt_n_music' %}
+{% set prov = state_attr(m, 'provider') or '' %}
+{% set id = state_attr(p, 'media_content_id') or '' %}
+{% set pl = states('input_text.n_music_inhalt') %}
+{% if is_state(m, 'playing') and prov not in ['', 'sendspin'] %}
+  {{ state_attr(m, 'display') or prov }}
+{% elif not is_state(p, 'playing') %}
+  –
+{% elif state_attr(p, 'source') != 'Music Assistant Queue' %}
+  Extern
+{% elif '://radio' in id %}
+  Internet Radio
+{% elif pl not in ['', 'unknown', 'unavailable'] %}
+  Tidal
+{% else %}
+  Music Assistant
+{% endif %}
