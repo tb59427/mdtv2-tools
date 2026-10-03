@@ -30,7 +30,9 @@ import socket
 from typing import Optional
 
 from core.bus import log
-from providers.base import Metadata, SourceProvider
+from providers.base import (
+    STATE_IDLE, STATE_PAUSED, STATE_PLAYING, Metadata, SourceProvider,
+)
 
 
 # TCP timeout on each MPD command. Localhost is instant; anything
@@ -55,6 +57,8 @@ class MpdProvider(SourceProvider):
     Caller supplies source_byte + display_name (typical: 0x7A N.MUSIC
     or 0xA1 N.RADIO with display "MPD" / "Netradio" / whatever fits).
     """
+
+    provider_name = "mpd"
 
     def __init__(
         self,
@@ -119,11 +123,17 @@ class MpdProvider(SourceProvider):
         `pause` and `stop` both count as not playing (Multi's last-
         writer-wins logic then correctly hands the source over when
         another sub takes over)."""
+        return self.playback_state() == STATE_PLAYING
+
+    def playback_state(self) -> str:
         out = self._cmd("status")
-        if not out:
-            return False
-        m = _STATE_RE.search(out)
-        return m is not None and m.group(1) == "play"
+        m = _STATE_RE.search(out) if out else None
+        state = m.group(1) if m else None
+        if state == "play":
+            return STATE_PLAYING
+        if state == "pause":
+            return STATE_PAUSED
+        return STATE_IDLE
 
     def metadata(self) -> Optional[Metadata]:
         out = self._cmd("currentsong")

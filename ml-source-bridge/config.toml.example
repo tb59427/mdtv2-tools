@@ -279,3 +279,39 @@ display_name = "N.RADIO"        # optional; up to 11 chars ASCII
 # "step_down" = "echo 'dim'      >> /tmp/light.log"
 # "play"      = "echo 'toggle'   >> /tmp/light.log"
 # "red"       = "echo 'red scene' >> /tmp/light.log"
+
+
+# ---- Home Assistant notifier (ha-notifier.service) -------------------------
+# Not read by the bridge itself: ha-notifier follows the bridge's now-playing
+# view on redis (state:nowplaying / link:ml:nowplaying) and POSTs every change
+# as JSON to a Home Assistant webhook -- so HA can show what's playing even
+# when it doesn't come from Music Assistant (e.g. AirPlay from an iPhone).
+# HA side: home-assistant/templates/mdt_n_music_webhook.yaml.
+#
+# Payload: {"source": "N.MUSIC", "source_byte": "0x7a", "provider": "airplay",
+#           "display": "Apple Music", "state": "playing" | "paused" | "idle",
+#           "title": "...", "artist": "...", "album": "...",
+#           "cover_url": "http://<pi>.local:8099/cover/<id>.jpg" | ""}
+#
+# After editing: sudo systemctl restart ha-notifier.service
+
+# [ha_notifier]
+# enabled  = true
+# url      = "http://homeassistant.local:8123/api/webhook/<webhook_id>"
+# sources  = ["N.MUSIC"]     # display_name or source byte ("0x7a"); omit = all
+#                            # sources. One webhook sensor per source in HA, so
+#                            # usually exactly one entry here.
+# timeout_s        = 3       # per POST
+# debounce_ms      = 300     # send a change once it's been stable this long
+# idle_debounce_ms = 3000    # ... longer when leaving "playing": swallows the
+#                            # brief Paused shairport reports during ML wake-up
+# keepalive_s      = 300     # resend unchanged state so HA catches up after a
+#                            # restart; 0 = off
+# retry_s          = 30      # retry interval while HA is unreachable
+# cover_port       = 8099    # serves AirPlay cover art (shairport-sync's cover
+#                            # cache) to the browser showing the HA card;
+#                            # 0 = off
+# cover_base_url   = "http://masterlink-bridge.local:8099"
+#                            # how the browser reaches the Pi; default
+#                            # http://<hostname>.local:<cover_port>. Set an IP
+#                            # here if .local doesn't resolve on your clients.

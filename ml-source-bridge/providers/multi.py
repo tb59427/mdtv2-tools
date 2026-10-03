@@ -87,6 +87,10 @@ class MultiSourceProvider(SourceProvider):
         # (or None if nothing was playing at last check). Updated inside
         # is_playing(); read by display_name / metadata / next / prev.
         self._active_idx: Optional[int] = None
+        # Last sub that was active, kept after _active_idx drops back to
+        # None. Lets the now-playing publisher report a paused AirPlay
+        # session as "paused" (with its track) instead of "idle".
+        self._last_idx: Optional[int] = None
         # Diagnostic: last playing-set signature we logged, so we only
         # log per transition instead of per poll. Temporary aid for
         # tracking sub-switch behaviour on the real bridge.
@@ -237,6 +241,7 @@ class MultiSourceProvider(SourceProvider):
                     f"pausing to enforce single-source rule")
                 self._safe_call(extra, "pause")
             self._active_idx = new_idx
+            self._last_idx = new_idx
         return True
 
     def metadata(self) -> Optional[Metadata]:
@@ -249,6 +254,14 @@ class MultiSourceProvider(SourceProvider):
                 f"{self._sub_displays[self._active_idx]!r} metadata "
                 f"raised: {e}", err=True)
             return None
+
+    def current_sub(self) -> Optional[SourceProvider]:
+        """The sub that owns the source right now, or -- when nothing is
+        playing -- the one that owned it last (may be paused). None if
+        no sub has played since startup. Uses the poll thread's cached
+        view, no extra backend calls."""
+        idx = self._active_idx if self._active_idx is not None else self._last_idx
+        return self._subs[idx] if idx is not None else None
 
     # ---- private ----------------------------------------------------------
 

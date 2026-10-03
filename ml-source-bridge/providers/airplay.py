@@ -21,7 +21,7 @@ import time
 from typing import Optional
 
 from core.bus import log
-from providers.base import Metadata, SourceProvider
+from providers.base import Metadata, SourceProvider, mpris_state
 
 
 # Stable D-Bus addresses for shairport-sync.
@@ -64,6 +64,9 @@ _ARTIST_RE = re.compile(
     r'string "xesam:artist"\s+variant\s+array\s*\[\s*string "(.*?)"')
 _GENRE_RE  = re.compile(
     r'string "xesam:genre"\s+variant\s+array\s*\[\s*string "(.*?)"')
+# MPRIS only: path into shairport-sync's cover_art_cache_directory, e.g.
+# file:///tmp/shairport-sync/.cache/coverart/cover-<md5>.jpg
+_ART_RE    = re.compile(r'string "mpris:artUrl"\s+variant\s+string "(.*?)"')
 
 
 def _dbus_send(method: str, *, timeout: float = 2.0) -> Optional[str]:
@@ -106,24 +109,32 @@ def _dbus_get_metadata(timeout: float = 2.0) -> Optional[str]:
     return r.stdout if r.returncode == 0 else None
 
 
-def _dbus_get_mpris_playback_status(timeout: float = 2.0) -> Optional[str]:
-    """Returns shairport-sync's MPRIS PlaybackStatus property -- one of
-    'Playing', 'Paused', 'Stopped' -- or None on failure (shairport
-    down, dbus error, etc.)."""
+def _dbus_get_mpris_property(name: str,
+                             timeout: float = 2.0) -> Optional[str]:
+    """Raw stdout of Properties.Get for `name` on shairport-sync's MPRIS
+    Player interface, or None on failure."""
     cmd = [
         "dbus-send", "--system", "--print-reply",
         f"--dest={_MPRIS_DEST}", _MPRIS_PATH,
         "org.freedesktop.DBus.Properties.Get",
-        f"string:{_MPRIS_PLAYER_IFACE}", "string:PlaybackStatus",
+        f"string:{_MPRIS_PLAYER_IFACE}", f"string:{name}",
     ]
     try:
         r = subprocess.run(cmd, capture_output=True, text=True,
                            timeout=timeout, check=False)
     except (subprocess.TimeoutExpired, FileNotFoundError):
         return None
-    if r.returncode != 0:
+    return r.stdout if r.returncode == 0 else None
+
+
+def _dbus_get_mpris_playback_status(timeout: float = 2.0) -> Optional[str]:
+    """Returns shairport-sync's MPRIS PlaybackStatus property -- one of
+    'Playing', 'Paused', 'Stopped' -- or None on failure (shairport
+    down, dbus error, etc.)."""
+    out = _dbus_get_mpris_property("PlaybackStatus", timeout=timeout)
+    if out is None:
         return None
-    m = _PLAYBACK_STATUS_RE.search(r.stdout)
+    m = _PLAYBACK_STATUS_RE.search(out)
     return m.group(1) if m else None
 
 
@@ -162,6 +173,8 @@ class AirPlayProvider(SourceProvider):
     The source byte and display name are caller-supplied so this provider
     can stand in for N.MUSIC (0x7A), CD (0x8D), N.RADIO (0xA1), etc.
     """
+
+    provider_name = "airplay"
 
     def __init__(self, source_byte: int, display_name: str) -> None:
         self.source_byte = source_byte
@@ -255,6 +268,11 @@ class AirPlayProvider(SourceProvider):
         status = _dbus_get_mpris_playback_status()
         return status == "Playing" if status is not None else False
 
+    def playback_state(self) -> str:
+        # 'Paused' while the iPhone holds the session paused; 'Stopped'
+        # once the client disconnects (shairport "play end").
+        return mpris_state(_dbus_get_mpris_playback_status())
+
     def metadata(self) -> Optional[Metadata]:
         out = _dbus_get_metadata()
         if not out:
@@ -271,6 +289,11 @@ class AirPlayProvider(SourceProvider):
             artist = artist.group(1) if artist else None,
             genre  = genre.group(1)  if genre  else None,
         )
+
+    def art_url(self) -> Optional[str]:
+        out = _dbus_get_mpris_property("Metadata")
+        m = _ART_RE.search(out) if out else None
+        return (m.group(1) or None) if m else None
 
     def _mute_loop(self) -> None:
         """Event-driven mute: wait for an event, mute ALSA, hold for the

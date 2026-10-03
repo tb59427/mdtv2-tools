@@ -19,7 +19,7 @@
 #                                            our HAT is compatible with)
 #   3. Patches /boot/firmware/cmdline.txt to drop the serial console.
 #   4. Disables conflicting services (serial-getty, hciuart).
-#   5. Copies code to /opt/mdt-tools/{broker,ml-source-bridge,ml-debug,mcu-firmware}.
+#   5. Copies code to /opt/mdt-tools/{broker,ml-source-bridge,ml-debug,ha-notifier,mcu-firmware}.
 #   6. Installs systemd unit files + the shairport-sync D-Bus policy.
 #   7. Sets up a hidden pymcuprog venv at /opt/mdt-tools/.pymcuprog-venv/
 #      (used transparently by mcu-firmware/flash.sh).
@@ -227,7 +227,7 @@ RSYNC_OPTS=(-a --delete
     --exclude 'config.toml'
     --exclude '.pymcuprog-venv'
 )
-for d in broker ml-source-bridge ml-debug dl-debug state-tracker mcu-firmware; do
+for d in broker ml-source-bridge ml-debug dl-debug state-tracker ha-notifier mcu-firmware; do
     rsync "${RSYNC_OPTS[@]}" "$SOURCE_DIR/$d/" "$INSTALL_ROOT/$d/"
 done
 chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_ROOT"
@@ -238,7 +238,8 @@ ok "code synced"
 note "systemd unit files"
 for src_unit in "$SOURCE_DIR/broker/mdtv2-broker.service" \
                 "$SOURCE_DIR/ml-source-bridge/ml-source-bridge.service" \
-                "$SOURCE_DIR/state-tracker/mdt-state.service"; do
+                "$SOURCE_DIR/state-tracker/mdt-state.service" \
+                "$SOURCE_DIR/ha-notifier/ha-notifier.service"; do
     name=$(basename "$src_unit")
     dst="/etc/systemd/system/$name"
     if cmp -s "$src_unit" "$dst" 2>/dev/null; then
@@ -317,9 +318,10 @@ if (( NEED_SHAIRPORT_RESTART )); then
         || warn "couldn't restart shairport-sync"
 fi
 
-# Enable + start (or restart) both services. Fresh install: enable+now.
-# Update install: restart to pick up new code.
-for svc in mdtv2-broker.service ml-source-bridge.service mdt-state.service; do
+# Enable + start (or restart) the services. Fresh install: enable+now.
+# Update install: restart to pick up new code. ha-notifier exits right
+# away (and stays down) until [ha_notifier] is enabled in the config.
+for svc in mdtv2-broker.service ml-source-bridge.service mdt-state.service ha-notifier.service; do
     if systemctl is-enabled --quiet "$svc" 2>/dev/null; then
         note "restarting $svc"
         systemctl restart "$svc"
@@ -336,6 +338,9 @@ echo
 echo "  services: $(systemctl is-active mdtv2-broker.service 2>/dev/null) mdtv2-broker, $(systemctl is-active ml-source-bridge.service 2>/dev/null) ml-source-bridge, $(systemctl is-active mdt-state.service 2>/dev/null) mdt-state"
 echo "  logs:     sudo journalctl -u mdtv2-broker.service -u ml-source-bridge.service -u mdt-state.service -f"
 echo "  state:    redis-cli GET state:ml | state:dl80 | state:dl86"
+echo "            redis-cli HGETALL state:nowplaying"
+echo "  HA:       enable [ha_notifier] in /etc/ml-source-bridge.toml, then"
+echo "            sudo systemctl restart ha-notifier.service"
 if (( NEED_CONFIG_EDIT )); then
     echo
     echo "  /etc/ml-source-bridge.toml was created with default values --"

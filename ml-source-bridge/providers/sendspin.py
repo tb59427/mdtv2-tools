@@ -40,7 +40,7 @@ import time
 from typing import Optional
 
 from core.bus import log
-from providers.base import Metadata, SourceProvider
+from providers.base import Metadata, SourceProvider, mpris_state
 
 
 # ---------------------------------------------------------------------------
@@ -79,6 +79,8 @@ _ARTIST_RE = re.compile(
 _GENRE_RE  = re.compile(
     r'string "xesam:genre"\s+variant\s+array\s*\[\s*string "(.*?)"')
 
+_ART_RE    = re.compile(r'string "mpris:artUrl"\s+variant\s+string "(.*?)"')
+
 # `dbus-send ListNames` returns each name inside `string "..."`.
 _LIST_NAMES_RE = re.compile(r'string "(.*?)"')
 
@@ -107,6 +109,8 @@ class SendspinProvider(SourceProvider):
     name so this provider can stand in for N.MUSIC (0x7A), N.RADIO
     (0xA1), etc.
     """
+
+    provider_name = "sendspin"
 
     def __init__(self, source_byte: int, display_name: str) -> None:
         self.source_byte = source_byte
@@ -177,6 +181,10 @@ class SendspinProvider(SourceProvider):
         status = self._dbus_get_property("PlaybackStatus")
         return status == "Playing" if status is not None else False
 
+    def playback_state(self) -> str:
+        # MPRIS name vanishes when no stream is active -> None -> idle.
+        return mpris_state(self._dbus_get_property("PlaybackStatus"))
+
     def metadata(self) -> Optional[Metadata]:
         out = self._dbus_get_property_raw("Metadata")
         if not out:
@@ -193,6 +201,11 @@ class SendspinProvider(SourceProvider):
             artist = artist.group(1) if artist else None,
             genre  = genre.group(1)  if genre  else None,
         )
+
+    def art_url(self) -> Optional[str]:
+        out = self._dbus_get_property_raw("Metadata")
+        m = _ART_RE.search(out) if out else None
+        return (m.group(1) or None) if m else None
 
     # ---- private: D-Bus plumbing on the user session bus -------------------
 
