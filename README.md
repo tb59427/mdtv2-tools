@@ -125,30 +125,100 @@ python3 /opt/mdt-tools/ml-debug/ml_debug.py        # MasterLink
 python3 /opt/mdt-tools/dl-debug/dl_debug.py        # Datalink
 ```
 
-## Configuration cheatsheet
+## Configuration
 
-The bridge reads `/etc/ml-source-bridge.toml`. Common sections:
+Everything lives in `/etc/ml-source-bridge.toml` (copied from
+[`ml-source-bridge/config.toml.example`](ml-source-bridge/config.toml.example)
+on first install -- that file documents every option and the Beo4 key
+names). After editing:
+
+```sh
+sudo systemctl restart ml-source-bridge ha-notifier
+```
+
+### Role and sources
 
 ```toml
-# Role we play on the bus
-role = "sc"           # or "am"
+role = "sc"                  # "sc" next to a B&O system, "am" to be its audio master
 
-# Audio sources we claim (one or more)
+[[sources]]                  # one table per ML source byte we claim
+source_byte  = 0xA1          # N.RADIO (also: 0x7A N.MUSIC, 0x8D CD, 0x6F RADIO)
+provider     = "airplay"     # airplay | sendspin | mpd | turntable
+display_name = "N.RADIO"     # shown on B&O panels (keep it short)
+```
+
+### Several providers on one source (multi-stream)
+
+`provider` can be a list. Whoever **starts streaming last** owns the source:
+the bridge pauses the previous one, so only one stream reaches the bus.
+
+```toml
 [[sources]]
-source_byte  = 0xA1   # N.RADIO
-provider     = "airplay"
-# or, for multiple providers 
-# provider = ["sendspin", "airplay"]
-# provider_default = "sendspin"
-display_name = "N.RADIO"
+source_byte      = 0x7A                          # N.MUSIC
+provider         = ["sendspin", "airplay", "mpd"]
+provider_default = "sendspin"   # gets Beo4 PLAY when nothing is playing (default: first)
+display_name     = "N.MUSIC"    # shown while the source is idle
 
-# when using multiple providers for one Source set a name for each provider
-# ---- display per provider  --------------------------------------------------
-# [provider_displays]
-# airplay  = "Apple Music"
-# sendspin = "Music Assistant"
+[provider_displays]             # label per provider while it plays
+airplay  = "Apple Music"
+sendspin = "Music Assistant"
+mpd      = "MPD Stream"
+```
 
-# Beo4 LIGHT key → arbitrary shell commands (home automation hook)
+- Next/previous go to the provider that currently plays; pause goes to all.
+- All providers must play through ALSA `dmix` so the handover works --
+  shairport-sync needs `output_device = "plug:dmix"`. Setup of AirPlay,
+  Sendspin and MPD: [docs/providers.md](docs/providers.md).
+
+MPD defaults to `localhost:6600` without password; override in `[mpd]`:
+
+```toml
+[mpd]
+host     = "localhost"
+port     = 6600
+password = ""
+```
+
+### Turntable and music recognition
+
+A DL'80 Beogram as a source; its audio is looped from the HAT's ADC to the
+DAC. Feed it line level (deck preamp or external phono stage).
+
+```toml
+[[sources]]
+source_byte  = 0xA1
+provider     = "turntable"
+display_name = "BG7000"
+
+[turntable]
+metadata_title = "BG7000"   # panel text while nothing is recognized
+recognize      = true       # identify the record via Shazam (optional)
+```
+
+`recognize = true` identifies each track from the audio alone (no Datalink
+needed) and shows title / artist / album / cover -- on panels that display
+source texts, and in Home Assistant. It uses shazamio, an unofficial Shazam
+client, which `install.sh` installs into its own venv only when this is set,
+so **re-run `install.sh` after enabling it**. Details:
+[bridge README](ml-source-bridge/README.md#music-recognition-optional).
+
+### Home Assistant
+
+```toml
+[ha_notifier]
+enabled = true
+url     = "http://<ha-host>:8123/api/webhook/<webhook-id>"
+sources = ["N.MUSIC", "BG7000"]     # display_names to report
+```
+
+ha-notifier posts every change (provider, title, artist, album, cover) to
+the HA webhook; HA config and setup: [docs/home-assistant.md](docs/home-assistant.md).
+
+### LIGHT key (home automation hook)
+
+Beo4 `LIGHT` + any key runs a shell command:
+
+```toml
 [light_handler]
 enabled   = true
 timeout_s = 20
@@ -161,9 +231,8 @@ timeout_s = 20
 "red"       = "/usr/local/bin/movie-mode.sh"
 ```
 
-See `ml-source-bridge/config.toml.example` (also copied to
-`/etc/ml-source-bridge.toml` on first install) for the full set of
-options and the complete Beo4 key name table.
+The config file is `root:mdt 0640` -- it can hold the webhook URL and
+tokens in commands.
 
 ## Repo layout vs. installed layout
 

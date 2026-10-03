@@ -1,16 +1,22 @@
 # Home Assistant integration
 
-Home Assistant (HA) building blocks for an ML source fed by the Pi -- here
-**N.MUSIC** with Music Assistant (via Sendspin) and AirPlay sharing it. The
-configuration itself is in [`home-assistant/`](../home-assistant/); this page
-explains how the pieces fit and how to set them up.
+Home Assistant (HA) building blocks for the sources the Pi feeds -- here
+**N.MUSIC** with Music Assistant (via Sendspin) and AirPlay sharing it, and
+a **turntable** (Beogram 7000, source label "BG7000") with optional music
+recognition. The configuration itself is in
+[`home-assistant/`](../home-assistant/); this page explains how the pieces
+fit and how to set them up.
 
 What you get:
 
-- A dashboard card showing what N.MUSIC plays -- source, station or
-  playlist, title, artist, cover -- with prev / play-pause / next.
+- One dashboard card for the system: what N.MUSIC plays -- source, station
+  or playlist, title, artist, cover -- with prev / play-pause / next.
 - It shows streams that **don't** come from Music Assistant too, e.g.
   AirPlay straight from an iPhone, reported by the Pi.
+- While the turntable plays it shows the record instead: title, artist,
+  album and cover once music recognition has identified the track, else
+  "Schallplatte" in front of a default image (a placeholder drawing, or a
+  photo of your own deck).
 - Beo4 control: `N.MUSIC` + digit picks a radio station, + colour key starts
   a playlist.
 
@@ -51,7 +57,8 @@ media_player.masterlink_bridge_ma (MA's view) ───────────�
 | Entity | Type | Purpose |
 |---|---|---|
 | `media_player.masterlink_bridge_ma` | MA player | Music Assistant -> Pi (Sendspin) -> N.MUSIC |
-| `sensor.mdt_n_music` | trigger template sensor (webhook) | What the Pi reports: provider, state, title / artist / album, cover URL |
+| `sensor.mdt_n_music` | trigger template sensor (webhook) | What the Pi reports for N.MUSIC: provider, state, title / artist / album, cover URL |
+| `sensor.mdt_phono` | trigger template sensor (same webhook) | The turntable: state, and title / artist / album / cover once recognized |
 | `sensor.n_music_quelle` | template sensor | Source label: `Internet Radio` / `Tidal` / `Music Assistant` / `Extern` / provider name from the Pi (e.g. `Apple Music`) / `–` |
 | `sensor.n_music_inhalt` | template sensor | Station or playlist name; album for non-MA streams; `–` |
 | `input_select.radio_station_list` | helper | Radio stations = MA favourites, filled by an automation |
@@ -81,7 +88,7 @@ Add to `/etc/ml-source-bridge.toml`:
 [ha_notifier]
 enabled = true
 url     = "http://<ha-host>:8123/api/webhook/mdt-nmusic-<random>"
-sources = ["N.MUSIC"]      # one webhook sensor per source in HA
+sources = ["N.MUSIC", "BG7000"]   # each has its own sensor in HA
 ```
 
 ```sh
@@ -103,10 +110,15 @@ doesn't resolve on the devices showing the dashboard, set
 mdt_nmusic_webhook: mdt-nmusic-<random>     # the same id as on the Pi
 ```
 
-Copy [`templates/mdt_n_music_webhook.yaml`](../home-assistant/templates/mdt_n_music_webhook.yaml)
+Copy [`templates/mdt_webhook.yaml`](../home-assistant/templates/mdt_webhook.yaml)
 into `configuration.yaml` -- trigger-based template sensors can't be created
 in the UI. If `configuration.yaml` already has a `template:` key, add the
 `- trigger:` list entry under it instead of a second `template:`.
+
+It defines one sensor per source on the same webhook; each takes only the
+messages for its source (`"source"` = the source's `display_name` on the
+Pi) and keeps its state otherwise. If your turntable source isn't called
+`BG7000`, change it in the `MDT Phono` sensor and in `sources` on the Pi.
 
 *Developer tools → YAML → Check configuration*, then restart HA (later
 changes: reload *Template entities*). `sensor.mdt_n_music` appears with state
@@ -166,14 +178,27 @@ automation in *change Radio Station*).
 
 ### 6. Dashboard card
 
-Add a card, *Show code editor*, paste
+Copy [`www/mdt/turntable.svg`](../home-assistant/www/mdt/turntable.svg) to
+`/config/www/mdt/` on HA (served as `/local/mdt/turntable.svg`) -- the
+turntable's default image. Then add a card, *Show code editor*, paste
 [`dashboard/n_music_button_card.yaml`](../home-assistant/dashboard/n_music_button_card.yaml).
 
-- Visible while `sensor.n_music_quelle` isn't `–` (in edit mode it always
-  shows).
-- Header *N.MUSIC · source · content*, title, artist, cover as background.
-- For non-MA streams: title, artist and cover from `sensor.mdt_n_music`; the
-  buttons are hidden because HA can't control those providers.
+Settings at the top of the card, under `variables`:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `phono_image` | `/local/mdt/turntable.svg` | Turntable background while no track is recognized -- e.g. a photo of your own deck in `/config/www/mdt/` (`/local/mdt/bg7000.jpg`) or any URL |
+| `phono_label` | `BG7000` | Header label for the turntable |
+
+- Visible while N.MUSIC plays (`sensor.n_music_quelle` isn't `–`) or the
+  turntable plays (in edit mode it always shows).
+- **N.MUSIC:** header *N.MUSIC · source · content*, title, artist, cover as
+  background. For non-MA streams, title, artist and cover come from
+  `sensor.mdt_n_music`.
+- **Turntable:** header *BG7000 · album*, title, artist, cover -- or
+  "Schallplatte" and the default image while nothing is recognized.
+- Buttons only for Music Assistant; HA can't control the other providers
+  or the turntable.
 
 ## Behaviour notes
 
@@ -185,6 +210,9 @@ Add a card, *Show code editor*, paste
   the ML system wakes up doesn't make the card flicker.
 - **HA restarts:** trigger sensors keep their last state; ha-notifier resends
   the current state every 5 minutes.
+- **Turntable:** titles need `[turntable] recognize = true` on the Pi (see
+  the bridge README); without it the card shows the default image whenever
+  the turntable plays.
 - **Payload** the Pi sends:
   `{"source", "source_byte", "provider", "display", "state", "title", "artist", "album", "cover_url"}`,
   `state` = `playing` / `paused` / `idle`.

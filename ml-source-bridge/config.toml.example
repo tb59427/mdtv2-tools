@@ -208,6 +208,36 @@ display_name = "N.RADIO"        # optional; up to 11 chars ASCII
 # riaa_gain_db     = 0.0    # fixed makeup gain (a live stream can't be
 #                           # peak-normalized the way a finished file is)
 #
+# ---- music recognition -- OFF by default ----
+# Identify what's on the record via Shazam and show title / artist / album
+# on the B&O display (and cover art wherever now-playing goes, e.g. Home
+# Assistant). Works on the audio alone, no Datalink needed: a new track is
+# music resuming after a silent gap. A result is only shown once two
+# attempts ~10 s apart agree; until then the display keeps metadata_title.
+#
+# Uses shazamio, an UNOFFICIAL Shazam client -- it can stop working
+# whenever Shazam changes its API. install.sh puts it into its own venv
+# (/opt/mdt-tools/.recognize-venv, ~40 MB) only when this is true; re-run
+# install.sh after enabling. Snippets (~10 s, mono) are sent to Shazam;
+# nothing is written to disk.
+# recognize            = true
+# recognize_snippet_s  = 10      # seconds per attempt (6 already works)
+# recognize_silence_db = -50.0   # quieter than this = gap between tracks
+# recognize_python     = "/opt/mdt-tools/.recognize-venv/bin/python"
+#
+# ---- audio tap: test snippets -- OFF by default ----
+# Set tap_dir to have the loopback write the last tap_snippet_s seconds of
+# what's playing, every tap_interval_s, as a 16-bit mono WAV (~1.4 MB per
+# 15 s); only the newest tap_keep files are kept. For collecting test
+# material; audio passes through unchanged.
+#
+# SD-card wear: keep tap_dir on a tmpfs (RAM) -- /tmp on Debian 13, or
+# /dev/shm. The tap logs a warning if it isn't.
+# tap_dir        = "/tmp/mdt-phono"
+# tap_snippet_s  = 15
+# tap_interval_s = 30
+# tap_keep       = 20
+#
 # ---- local controls on the deck ----
 # The deck's own PLAY / STANDBY buttons drive ML, not just the other way
 # round: it reports its state on DL'80, so pressing PLAY switches the ML
@@ -286,7 +316,7 @@ display_name = "N.RADIO"        # optional; up to 11 chars ASCII
 # view on redis (state:nowplaying / link:ml:nowplaying) and POSTs every change
 # as JSON to a Home Assistant webhook -- so HA can show what's playing even
 # when it doesn't come from Music Assistant (e.g. AirPlay from an iPhone).
-# HA side: home-assistant/templates/mdt_n_music_webhook.yaml.
+# HA side: home-assistant/templates/mdt_webhook.yaml (one sensor per source).
 #
 # Payload: {"source": "N.MUSIC", "source_byte": "0x7a", "provider": "airplay",
 #           "display": "Apple Music", "state": "playing" | "paused" | "idle",
@@ -298,9 +328,10 @@ display_name = "N.RADIO"        # optional; up to 11 chars ASCII
 # [ha_notifier]
 # enabled  = true
 # url      = "http://homeassistant.local:8123/api/webhook/<webhook_id>"
-# sources  = ["N.MUSIC"]     # display_name or source byte ("0x7a"); omit = all
-#                            # sources. One webhook sensor per source in HA, so
-#                            # usually exactly one entry here.
+# sources  = ["N.MUSIC", "BG7000"]
+#                            # display_name or source byte ("0x7a"); omit = all
+#                            # sources. Each needs its own sensor in HA's
+#                            # webhook block (mdt_webhook.yaml).
 # timeout_s        = 3       # per POST
 # debounce_ms      = 300     # send a change once it's been stable this long
 # idle_debounce_ms = 3000    # ... longer when leaving "playing": swallows the

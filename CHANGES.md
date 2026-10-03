@@ -55,6 +55,16 @@ here is Philip's work, unchanged.
 - Providers distinguish `playing` / `paused` / `idle` (`playback_state`) and
   report cover art (`art_url`, MPRIS `mpris:artUrl`).
 
+### Music recognition for the turntable
+
+- Optional (`[turntable] recognize = true`): identifies what's on the record
+  via Shazam (shazamio, unofficial; own venv installed by `install.sh` only
+  when enabled) and shows title / artist / album / cover. Audio-only track
+  detection (silent gaps), results shown only when two attempts agree.
+  `providers/audio_tap.py` (pass-through tap in the loopback),
+  `providers/phono_recognize.py`. Optional test snippets via `tap_dir`
+  (meant for a tmpfs).
+
 ### Home Assistant
 
 - **ha-notifier** (`ha-notifier/`, new service): forwards now-playing
