@@ -111,6 +111,10 @@ the audio alone -- no Datalink cable needed:
   "(2016 Remaster)" are stripped from album names.
 * Results travel over redis pub/sub (`link:phono:recognized`); nothing is
   written to disk.
+* On the bus the texts go out as EXTENDED_SOURCE_INFORMATION (capped at 10
+  characters). Whether a panel shows them depends on the model: a
+  BeoSound 3200 keeps showing only the source name (`display_name`), so
+  there the result is mainly useful via now-playing (Home Assistant).
 
 In tests with recordings from a Beogram 7000, mainstream pop/rock was
 recognized in every snippet (shown ~20 s after a track starts), while a
