@@ -275,8 +275,8 @@ class ApiSession:
     out: list = field(default_factory=list)
 
 
-def handle_api_message(cfg: Config, feed: TelegramFeed, s: ApiSession,
-                       msg_type: int, payload: bytes, send_to_bus) -> None:
+def handle_api_message(cfg: Config, s: ApiSession, msg_type: int,
+                       payload: bytes, emit) -> None:
     """One MLGW-protocol message; replies are appended to s.out."""
     if msg_type == MT_PING:
         # The integration pings right after connecting; an unauthenticated
@@ -305,13 +305,10 @@ def handle_api_message(cfg: Config, feed: TelegramFeed, s: ApiSession,
         if addr is None:
             log(f"Beo4 0x{cmd:02x} for unknown MLN {mln} -- dropped")
             return
-        t = beo4_telegram(addr, cmd, dest, sec, link)
         if cfg.listen_only:
             log(f"listen-only: Beo4 0x{cmd:02x} dest 0x{dest:02x} -> MLN {mln} "
                 f"(0x{addr:02x}) not sent")
-            feed.publish(t)                 # as the ML log would show it
-        else:
-            send_to_bus(t)
+        emit(beo4_telegram(addr, cmd, dest, sec, link))
     elif msg_type in (MT_BR1_CMD, MT_BR1_SELECT):
         log(f"BeoRemote One message 0x{msg_type:02x} {payload.hex()} -- "
             f"not supported yet")
@@ -321,7 +318,7 @@ def handle_api_message(cfg: Config, feed: TelegramFeed, s: ApiSession,
         log(f"unhandled MLGW message 0x{msg_type:02x} {payload.hex()}")
 
 
-async def handle_api(cfg: Config, feed: TelegramFeed, send_to_bus,
+async def handle_api(cfg: Config, emit,
                      reader: asyncio.StreamReader,
                      writer: asyncio.StreamWriter) -> None:
     peer = writer.get_extra_info("peername")[0]
@@ -337,7 +334,7 @@ async def handle_api(cfg: Config, feed: TelegramFeed, send_to_bus,
             while len(buf) >= 4 and buf[0] == 0x01 and len(buf) >= 4 + buf[2]:
                 n = buf[2]
                 msg_type, payload, buf = buf[1], buf[4:4 + n], buf[4 + n:]
-                handle_api_message(cfg, feed, s, msg_type, payload, send_to_bus)
+                handle_api_message(cfg, s, msg_type, payload, emit)
             if buf and buf[0] != 0x01:                    # resync on garbage
                 buf = buf[buf.find(b"\x01"):] if b"\x01" in buf else b""
             # The integration reads one message per recv(): send replies
@@ -432,6 +429,40 @@ async def handle_telnet(cfg: Config, feed: TelegramFeed,
         log(f"telnet connection from {peer} closed")
 
 
+# ---- outgoing telegrams -------------------------------------------------------
+
+class Pacer:
+    """Puts our telegrams out one at a time, `gap_s` apart, like a real
+    MLGW on the bus. Matters beyond bus etiquette: the integration learns
+    device addresses by matching the ML log's answers to its commands IN
+    ORDER, and HA handles events on several threads -- a burst of answers
+    arrives shuffled and devices get each other's addresses.
+
+    listen_only: the telegram only goes into the ML log (as if sent);
+    otherwise onto the bus, and the bus echo reaches the log by itself."""
+
+    def __init__(self, cfg: Config, feed: TelegramFeed, send_to_bus,
+                 gap_s: float = 0.15) -> None:
+        self.cfg, self.feed, self.send_to_bus = cfg, feed, send_to_bus
+        self.gap_s = gap_s
+        self.queue: asyncio.Queue[bytes] = asyncio.Queue()
+
+    def emit(self, telegram: bytes) -> None:
+        self.queue.put_nowait(telegram)
+
+    async def run(self) -> None:
+        while True:
+            t = await self.queue.get()
+            try:
+                if self.cfg.listen_only:
+                    self.feed.publish(t)
+                else:
+                    self.send_to_bus(t)
+            except Exception as e:
+                log(f"sending {t.hex()} failed: {e}")
+            await asyncio.sleep(self.gap_s)
+
+
 # ---- main -------------------------------------------------------------------------
 
 async def serve(cfg: Config) -> None:
@@ -450,12 +481,14 @@ async def serve(cfg: Config) -> None:
             tx = redis.StrictRedis(host=cfg.redis_host, port=cfg.redis_port)
         tx.publish(CHAN_ML_TX, t.hex())
 
+    pacer = Pacer(cfg, feed, send_to_bus)
+    pacer_task = asyncio.create_task(pacer.run())
     auth = DigestAuth(cfg.username, cfg.password)
     servers = [
         await asyncio.start_server(
             lambda r, w: handle_http(cfg, auth, r, w), port=cfg.http_port),
         await asyncio.start_server(
-            lambda r, w: handle_api(cfg, feed, send_to_bus, r, w), port=cfg.api_port),
+            lambda r, w: handle_api(cfg, pacer.emit, r, w), port=cfg.api_port),
         await asyncio.start_server(
             lambda r, w: handle_telnet(cfg, feed, r, w), port=cfg.telnet_port),
     ]
@@ -467,6 +500,7 @@ async def serve(cfg: Config) -> None:
     try:
         await asyncio.gather(*(s.serve_forever() for s in servers))
     finally:
+        pacer_task.cancel()
         stop.set()
 
 
