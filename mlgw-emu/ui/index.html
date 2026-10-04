@@ -1,0 +1,344 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MasterLink Gateway</title>
+<style>
+  :root {
+    --bg: #f4f5f7; --card: #ffffff; --fg: #1d2125; --muted: #66707a;
+    --line: #dde1e6; --accent: #2f6fdb; --accent-fg: #ffffff;
+    --warn-bg: #fff4d6; --warn-fg: #6b4e00; --err-bg: #fde3e3; --err-fg: #8a1c1c;
+    --ok-bg: #dff5e3; --ok-fg: #1d5e2b; --input: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #15181b; --card: #1e2226; --fg: #e6e8ea; --muted: #9aa3ad;
+      --line: #30363c; --accent: #5b8ff0; --accent-fg: #0d1117;
+      --warn-bg: #3a3214; --warn-fg: #f2d98a; --err-bg: #3d1b1b; --err-fg: #f3b0b0;
+      --ok-bg: #173320; --ok-fg: #9fe0ae; --input: #15181b;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  header { position: sticky; top: 0; z-index: 2; background: var(--card);
+           border-bottom: 1px solid var(--line); padding: 10px 16px;
+           display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  header h1 { font-size: 16px; margin: 0 12px 0 0; }
+  main { max-width: 1100px; margin: 0 auto; padding: 16px; }
+  .chip { font-size: 12px; padding: 2px 8px; border-radius: 10px; background: var(--line); color: var(--muted); }
+  .chip.warn { background: var(--warn-bg); color: var(--warn-fg); }
+  .chip.ok { background: var(--ok-bg); color: var(--ok-fg); }
+  .spacer { flex: 1; }
+  button { font: inherit; border: 1px solid var(--line); background: var(--card); color: var(--fg);
+           border-radius: 6px; padding: 5px 10px; cursor: pointer; }
+  button:hover { border-color: var(--muted); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+  button.primary:disabled { opacity: .45; cursor: default; }
+  button.small { padding: 2px 7px; font-size: 12px; }
+  button.danger:hover { border-color: var(--err-fg); color: var(--err-fg); }
+  input, select { font: inherit; color: var(--fg); background: var(--input);
+                  border: 1px solid var(--line); border-radius: 5px; padding: 4px 6px; min-width: 0; }
+  input.num { width: 64px; }
+  .banner { padding: 8px 12px; border-radius: 6px; margin-bottom: 12px; }
+  .banner.err { background: var(--err-bg); color: var(--err-fg); }
+  .banner.ok { background: var(--ok-bg); color: var(--ok-fg); }
+  .banner.warn { background: var(--warn-bg); color: var(--warn-fg); }
+  .room { background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+          margin-bottom: 14px; padding: 12px; }
+  .room-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+  .room-head input.name { font-weight: 600; flex: 1; min-width: 160px; }
+  .device { border-top: 1px solid var(--line); padding-top: 10px; margin-top: 10px; }
+  .device-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .device-head input.name { flex: 1; min-width: 160px; }
+  label.f { display: inline-flex; gap: 4px; align-items: center; color: var(--muted); font-size: 12px; }
+  table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+  th { text-align: left; font-weight: 500; color: var(--muted); font-size: 12px; padding: 4px; }
+  td { padding: 3px 4px; vertical-align: middle; }
+  td input, td select { width: 100%; }
+  .fav td { background: var(--bg); }
+  .hint { color: var(--muted); font-size: 12px; }
+  .identify { font-size: 12px; color: var(--warn-fg); background: var(--warn-bg); padding: 2px 8px; border-radius: 4px; }
+  .table-wrap { overflow-x: auto; }
+</style>
+</head>
+<body>
+<header>
+  <h1>MasterLink Gateway</h1>
+  <label class="f">Project <input id="project" size="16"></label>
+  <span class="chip" id="serial"></span>
+  <span class="chip" id="mode"></span>
+  <span class="chip" id="ha"></span>
+  <span class="spacer"></span>
+  <button id="add-room">Add room</button>
+  <button id="import">Import MLGW export…</button>
+  <input type="file" id="import-file" accept=".json,application/json" hidden>
+  <button id="export">Export</button>
+  <button id="revert">Revert</button>
+  <button id="save" class="primary" disabled>Save</button>
+</header>
+<main>
+  <div id="banner"></div>
+  <p class="hint">Rooms, devices and sources as Home Assistant's mlgw integration sees them.
+    Each device needs its <b>ML address</b> (its address on the MasterLink bus) — pick it from the
+    devices seen on the bus, or press <b>Identify</b> and then any key on the Beo4 in that room.
+    Saving makes Home Assistant reload the integration.</p>
+  <div id="rooms"></div>
+</main>
+<script>
+"use strict";
+let cfg = null, saved = "", meta = {keys: {}, sources: {}}, bus = [];
+
+const $ = (sel) => document.querySelector(sel);
+const hex = (n) => "0x" + Number(n).toString(16).toUpperCase().padStart(2, "0");
+const keyName = (c) => meta.keys[String(c)] || "";
+const srcName = (c) => meta.sources[String(c)] || "";
+
+function el(tag, attrs = {}, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+    else if (k === "value") e.value = v;
+    else if (v !== false && v != null) e.setAttribute(k, v === true ? "" : v);
+  }
+  for (const k of kids.flat()) if (k != null) e.append(k.nodeType ? k : document.createTextNode(k));
+  return e;
+}
+
+function banner(kind, text) {
+  $("#banner").replaceChildren(text ? el("div", {class: "banner " + kind}, text) : "");
+}
+
+function isDirty() { return JSON.stringify(stripUi(cfg)) !== saved; }
+
+function dirty() {
+  const d = isDirty();
+  $("#save").disabled = !d;
+  document.title = (d ? "• " : "") + "MasterLink Gateway";
+}
+
+async function api(path, opts = {}) {
+  const r = await fetch(path, {cache: "no-store", ...opts});
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(body.error || r.statusText);
+  return body;
+}
+
+// ---- selects -------------------------------------------------------------
+
+function codeSelect(table, value, onchange, label) {
+  const s = el("select", {onchange: (e) => onchange(parseInt(e.target.value))});
+  const codes = Object.keys(table).map(Number);
+  if (value != null && !codes.includes(value)) codes.push(value);
+  codes.sort((a, b) => a - b);
+  for (const c of codes)
+    s.append(el("option", {value: c, selected: c === value}, `${hex(c)}  ${table[String(c)] || label}`));
+  return s;
+}
+
+function addressSelect(dev) {
+  const s = el("select", {onchange: (e) => {
+    const v = e.target.value;
+    if (v === "custom") {
+      const t = prompt("ML address (hex, e.g. 0x2A):", dev.mlAddress != null ? hex(dev.mlAddress) : "0x");
+      const n = t ? parseInt(t, 16) : NaN;
+      if (!isNaN(n) && n >= 0 && n <= 255) dev.mlAddress = n;
+      render();
+    } else {
+      if (v === "") delete dev.mlAddress; else dev.mlAddress = parseInt(v);
+      dirty();
+    }
+  }});
+  s.append(el("option", {value: "", selected: dev.mlAddress == null}, "— none —"));
+  const seen = new Set();
+  for (const b of bus) {
+    seen.add(b.address);
+    const what = [b.class, b.name].filter(Boolean).join(", ");
+    s.append(el("option", {value: b.address, selected: b.address === dev.mlAddress},
+      `${hex(b.address)}${what ? "  (" + what + ")" : ""}${b.present === false ? "  – not present" : ""}`));
+  }
+  if (dev.mlAddress != null && !seen.has(dev.mlAddress))
+    s.append(el("option", {value: dev.mlAddress, selected: true}, `${hex(dev.mlAddress)}  (not seen on the bus)`));
+  s.append(el("option", {value: "custom"}, "other…"));
+  return s;
+}
+
+// ---- identify: next Beo4 key on the bus gives the address ----------------
+
+async function identify(dev, btn) {
+  const before = await api("/api/last-key").catch(() => ({}));
+  const t0 = before.time || 0;
+  const note = el("span", {class: "identify"}, "Press any key on the Beo4 in this room …");
+  btn.replaceWith(note);
+  for (let i = 0; i < 60; i++) {
+    await new Promise((r) => setTimeout(r, 1000));
+    const k = await api("/api/last-key").catch(() => ({}));
+    if (k.time && k.time > t0) {
+      dev.mlAddress = k.address;
+      banner("ok", `Identified ${hex(k.address)} (key ${keyName(k.key) || hex(k.key)}).`);
+      return render();
+    }
+  }
+  banner("warn", "No Beo4 key seen within 60 s. Not every device forwards keys to the bus.");
+  render();
+}
+
+// ---- rendering -----------------------------------------------------------
+
+function nextMLN() {
+  let m = 0;
+  for (const z of cfg.zones) for (const p of z.products || []) m = Math.max(m, p.MLN || 0);
+  return m + 1;
+}
+
+function seqText(seq) {
+  return (seq || []).map((x) => typeof x === "object" ? "d" + (x.delay || 0) : String(x)).join(" ");
+}
+function seqParse(text) {
+  return text.trim().split(/[\s,]+/).filter(Boolean).map((t) =>
+    t[0] === "d" ? {delay: parseInt(t.slice(1)) || 0} : parseInt(t)).filter((x) => typeof x === "object" || !isNaN(x));
+}
+
+function sourceRows(dev) {
+  const rows = [];
+  (dev.sources || []).forEach((s, i) => {
+    rows.push(el("tr", {},
+      el("td", {}, el("input", {value: s.name || "", oninput: (e) => { s.name = e.target.value; dirty(); }})),
+      el("td", {}, codeSelect(meta.keys, s.selectID, (v) => { s.selectID = v; dirty(); }, "Beo4 key")),
+      el("td", {}, codeSelect(meta.sources, s.statusID, (v) => { s.statusID = v; dirty(); }, "source")),
+      el("td", {}, (() => {
+        const sel = el("select", {onchange: (e) => { s.destination = parseInt(e.target.value); dirty(); }});
+        for (const [v, t] of [[1, "Audio"], [0, "Video"]])
+          sel.append(el("option", {value: v, selected: s.destination === v}, t));
+        return sel;
+      })()),
+      el("td", {}, el("button", {class: "small", onclick: () => { s._open = !s._open; render(); }},
+        `Favorites (${(s.channels || []).length})`)),
+      el("td", {}, el("button", {class: "small danger", title: "Remove source",
+        onclick: () => { dev.sources.splice(i, 1); render(); }}, "×"))));
+    if (s._open) {
+      (s.channels || []).forEach((c, j) => rows.push(el("tr", {class: "fav"},
+        el("td", {}, el("input", {value: c.name || "", placeholder: "Station",
+          oninput: (e) => { c.name = e.target.value; dirty(); }})),
+        el("td", {colspan: 2}, el("input", {value: c.icon || "", placeholder: "Icon URL",
+          oninput: (e) => { c.icon = e.target.value; dirty(); }})),
+        el("td", {colspan: 2}, el("input", {value: seqText(c.selectSEQ), placeholder: "Keys, e.g. 1 d100 0",
+          title: "Beo4 digits to press; d100 = pause 100 ms",
+          oninput: (e) => { c.selectSEQ = seqParse(e.target.value); dirty(); }})),
+        el("td", {}, el("button", {class: "small danger", onclick: () => { s.channels.splice(j, 1); render(); }}, "×")))));
+      rows.push(el("tr", {class: "fav"}, el("td", {colspan: 6},
+        el("button", {class: "small", onclick: () => {
+          (s.channels = s.channels || []).push({name: "", icon: "", selectSEQ: []}); render(); }}, "Add favorite"))));
+    }
+  });
+  return rows;
+}
+
+function deviceBlock(zone, dev, di) {
+  const idBtn = el("button", {class: "small", onclick: (e) => identify(dev, e.target)}, "Identify");
+  return el("div", {class: "device"},
+    el("div", {class: "device-head"},
+      el("input", {class: "name", value: dev.name || "", placeholder: "Device name",
+        oninput: (e) => { dev.name = e.target.value; dirty(); }}),
+      el("label", {class: "f"}, "MLN", el("input", {class: "num", type: "number", min: 1, max: 255,
+        value: dev.MLN, oninput: (e) => { dev.MLN = parseInt(e.target.value); dirty(); }})),
+      el("label", {class: "f"}, "ML address", addressSelect(dev)),
+      idBtn,
+      el("button", {class: "small danger", onclick: () => {
+        if (confirm(`Remove ${dev.name || "this device"}?`)) { zone.products.splice(di, 1); render(); } }}, "Remove")),
+    el("div", {class: "table-wrap"}, el("table", {},
+      el("thead", {}, el("tr", {}, ["Source", "Beo4 select key", "ML source (status)", "Destination", "", ""]
+        .map((h) => el("th", {}, h)))),
+      el("tbody", {}, sourceRows(dev)))),
+    el("button", {class: "small", onclick: () => {
+      (dev.sources = dev.sources || []).push({name: "", selectID: 0x94, statusID: 0x7a, destination: 1, channels: []});
+      render(); }}, "Add source"));
+}
+
+function render() {
+  $("#project").value = cfg.project || "";
+  const root = $("#rooms");
+  root.replaceChildren();
+  cfg.zones.forEach((z, zi) => {
+    z.products = z.products || [];
+    root.append(el("section", {class: "room"},
+      el("div", {class: "room-head"},
+        el("label", {class: "f"}, "Room", el("input", {class: "num", type: "number", min: 0, max: 255,
+          value: z.number, oninput: (e) => { z.number = parseInt(e.target.value); dirty(); }})),
+        el("input", {class: "name", value: z.name || "", placeholder: "Room name",
+          oninput: (e) => { z.name = e.target.value; dirty(); }}),
+        el("button", {class: "small", onclick: () => {
+          z.products.push({MLN: nextMLN(), name: "", sources: []}); render(); }}, "Add device"),
+        el("button", {class: "small danger", onclick: () => {
+          if (confirm(`Remove room ${z.name || z.number} with its devices?`)) { cfg.zones.splice(zi, 1); render(); } }},
+          "Remove room")),
+      z.products.map((p, di) => deviceBlock(z, p, di))));
+  });
+  dirty();
+}
+
+// ---- actions ---------------------------------------------------------------
+
+function stripUi(c) {
+  return JSON.parse(JSON.stringify(c, (k, v) => k.startsWith("_") ? undefined : v));
+}
+
+async function save() {
+  try {
+    await api("/api/config", {method: "PUT", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(stripUi(cfg))});
+    await load();
+    banner("ok", "Saved. Home Assistant reloads the integration.");
+  } catch (e) { banner("err", "Not saved: " + e.message); }
+}
+
+async function load() {
+  cfg = await api("/api/config");
+  cfg.zones = cfg.zones || [];
+  saved = JSON.stringify(stripUi(cfg));
+  render();
+}
+
+async function refreshMeta() {
+  meta = await api("/api/meta").catch(() => meta);
+  bus = await api("/api/bus-devices").catch(() => []);
+  $("#serial").textContent = meta.serial ? "SN " + meta.serial : "no serial";
+  $("#mode").textContent = meta.listen_only ? "listen-only" : "sending";
+  $("#mode").className = "chip " + (meta.listen_only ? "warn" : "ok");
+  $("#ha").textContent = `${meta.sessions || 0} HA connection${meta.sessions === 1 ? "" : "s"}`;
+}
+
+$("#project").addEventListener("input", (e) => { cfg.project = e.target.value; dirty(); });
+$("#save").addEventListener("click", save);
+$("#revert").addEventListener("click", () => { cfg = JSON.parse(saved); banner(); render(); });
+$("#add-room").addEventListener("click", () => {
+  const n = Math.max(0, ...cfg.zones.map((z) => z.number || 0)) + 1;
+  cfg.zones.push({number: n, name: "", products: [], scenes: [], cameras: []}); render();
+});
+$("#export").addEventListener("click", () => {
+  const a = el("a", {href: URL.createObjectURL(new Blob([JSON.stringify(stripUi(cfg), null, 1)],
+    {type: "application/json"})), download: "mlgw-devices.json"});
+  a.click();
+});
+$("#import").addEventListener("click", () => $("#import-file").click());
+$("#import-file").addEventListener("change", async (e) => {
+  const f = e.target.files[0]; if (!f) return;
+  try {
+    cfg = await api("/api/import", {method: "POST", body: await f.text()});
+    cfg.zones = cfg.zones || [];
+    render();
+    banner("warn", `Imported ${f.name}. ML addresses kept for known MLNs — check them, then Save.`);
+  } catch (err) { banner("err", "Import failed: " + err.message); }
+  e.target.value = "";
+});
+window.addEventListener("beforeunload", (e) => { if (cfg && isDirty()) e.preventDefault(); });
+
+(async () => {
+  try { await refreshMeta(); await load(); }
+  catch (e) { banner("err", "Could not load: " + e.message); }
+  setInterval(refreshMeta, 15000);
+})();
+</script>
+</body>
+</html>
