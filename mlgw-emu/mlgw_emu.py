@@ -89,6 +89,7 @@ class Config:
     redis_host: str = "localhost"
     redis_port: int = 6379
     serial: str = ""
+    extended_status: bool = False       # source status for link rooms too
     seed_json: str = ""                 # MLGW export to start from
     seed_addresses: dict = field(default_factory=dict)
 
@@ -112,6 +113,7 @@ def load_config(path: str) -> Optional[Config]:
         redis_host=str(cfg.get("redis_host", "localhost")),
         redis_port=int(cfg.get("redis_port", 6379)),
         serial=str(sec.get("serial", "")),
+        extended_status=bool(sec.get("extended_status", False)),
         seed_json=str(sec.get("config_json", "")),
         seed_addresses={int(k): int(v) for k, v in (sec.get("addresses") or {}).items()},
     )
@@ -268,7 +270,8 @@ class Gateway:
         self.cfg = cfg
         self.store = store
         self.sessions: set[ApiSession] = set()
-        self.synth = EventSynth(store.by_address, self.broadcast, log)
+        self.synth = EventSynth(store.by_address, self.broadcast, log,
+                                extended=cfg.extended_status)
         self.pacer: Optional[Pacer] = None
 
     def broadcast(self, msg: bytes) -> None:
