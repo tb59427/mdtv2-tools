@@ -376,6 +376,14 @@ def strip_telnet(data: bytes) -> bytes:
     return bytes(out)
 
 
+# Telnet sessions by client IP. When HA reloads the integration, the old
+# instance's session can linger for a moment and deliver ML-log lines to
+# HA twice -- the new instance then counts one address-learning answer too
+# many (devices shifted by one, or an exception in the integration). A new
+# login from the same host therefore closes that host's older sessions.
+TELNET_SESSIONS: dict[str, set[asyncio.StreamWriter]] = {}
+
+
 async def handle_telnet(cfg: Config, feed: TelegramFeed,
                         reader: asyncio.StreamReader,
                         writer: asyncio.StreamWriter) -> None:
@@ -407,6 +415,10 @@ async def handle_telnet(cfg: Config, feed: TelegramFeed,
             await writer.drain()
             log(f"telnet login failed from {peer}")
             return
+        for old in list(TELNET_SESSIONS.get(peer, ())):
+            log(f"closing older telnet session from {peer}")
+            old.close()
+        TELNET_SESSIONS.setdefault(peer, set()).add(writer)
         writer.write(b"\r\nmdtv2 MLGW emulation\r\nMLGW >")
         await writer.drain()
         log(f"telnet login from {peer}")
@@ -425,6 +437,7 @@ async def handle_telnet(cfg: Config, feed: TelegramFeed,
     except (asyncio.TimeoutError, ConnectionError):
         pass
     finally:
+        TELNET_SESSIONS.get(peer, set()).discard(writer)
         if queue is not None:
             feed.queues.discard(queue)
         if pump is not None:
