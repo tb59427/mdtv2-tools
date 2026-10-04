@@ -1,0 +1,468 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mdtv2</title>
+<style>
+  :root {
+    --bg: #f4f5f7; --card: #ffffff; --fg: #1d2125; --muted: #66707a;
+    --line: #dde1e6; --accent: #2f6fdb; --accent-fg: #ffffff;
+    --warn-bg: #fff4d6; --warn-fg: #6b4e00; --err-bg: #fde3e3; --err-fg: #8a1c1c;
+    --ok-bg: #dff5e3; --ok-fg: #1d5e2b; --input: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #15181b; --card: #1e2226; --fg: #e6e8ea; --muted: #9aa3ad;
+      --line: #30363c; --accent: #5b8ff0; --accent-fg: #0d1117;
+      --warn-bg: #3a3214; --warn-fg: #f2d98a; --err-bg: #3d1b1b; --err-fg: #f3b0b0;
+      --ok-bg: #173320; --ok-fg: #9fe0ae; --input: #15181b;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  header { position: sticky; top: 0; z-index: 2; background: var(--card); border-bottom: 1px solid var(--line); }
+  .bar { max-width: 1100px; margin: 0 auto; padding: 8px 16px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  header h1 { font-size: 16px; margin: 0 10px 0 0; }
+  nav { display: flex; flex-wrap: wrap; gap: 2px; }
+  nav a { color: var(--muted); text-decoration: none; padding: 5px 10px; border-radius: 6px; }
+  nav a.active { background: var(--bg); color: var(--fg); font-weight: 600; }
+  main { max-width: 1100px; margin: 0 auto; padding: 16px; }
+  .spacer { flex: 1; }
+  .chip { font-size: 12px; padding: 2px 8px; border-radius: 10px; background: var(--line); color: var(--muted); white-space: nowrap; }
+  .chip.ok { background: var(--ok-bg); color: var(--ok-fg); }
+  .chip.warn { background: var(--warn-bg); color: var(--warn-fg); }
+  .chip.err { background: var(--err-bg); color: var(--err-fg); }
+  button { font: inherit; border: 1px solid var(--line); background: var(--card); color: var(--fg);
+           border-radius: 6px; padding: 5px 10px; cursor: pointer; }
+  button:hover { border-color: var(--muted); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+  button:disabled { opacity: .45; cursor: default; }
+  button.small { padding: 2px 7px; font-size: 12px; }
+  button.danger:hover { border-color: var(--err-fg); color: var(--err-fg); }
+  input, select, textarea { font: inherit; color: var(--fg); background: var(--input);
+           border: 1px solid var(--line); border-radius: 5px; padding: 4px 6px; min-width: 0; }
+  input[type=checkbox] { width: auto; }
+  input.num { width: 72px; }
+  .banner { padding: 8px 12px; border-radius: 6px; margin-bottom: 12px; white-space: pre-line; }
+  .banner.err { background: var(--err-bg); color: var(--err-fg); }
+  .banner.ok { background: var(--ok-bg); color: var(--ok-fg); }
+  .banner.warn { background: var(--warn-bg); color: var(--warn-fg); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; margin-bottom: 14px; padding: 12px 14px; }
+  .card h2 { font-size: 15px; margin: 0 0 10px; }
+  .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin: 6px 0; }
+  label.f { display: inline-flex; gap: 6px; align-items: center; color: var(--muted); font-size: 13px; }
+  label.f.stack { flex-direction: column; align-items: flex-start; gap: 2px; }
+  .grow { flex: 1; min-width: 200px; }
+  .grow input { width: 100%; }
+  .hint { color: var(--muted); font-size: 12px; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; font-weight: 500; color: var(--muted); font-size: 12px; padding: 4px; }
+  td { padding: 3px 4px; vertical-align: middle; }
+  td input, td select { width: 100%; }
+  .table-wrap { overflow-x: auto; }
+  .sub { border-top: 1px solid var(--line); padding-top: 10px; margin-top: 10px; }
+  .fav td { background: var(--bg); }
+  .identify { font-size: 12px; color: var(--warn-fg); background: var(--warn-bg); padding: 2px 8px; border-radius: 4px; }
+  .np { display: grid; grid-template-columns: 110px 1fr; gap: 2px 10px; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header><div class="bar">
+  <h1>mdtv2</h1>
+  <nav id="nav">
+    <a href="#status">Status</a><a href="#sources">Sources</a><a href="#turntable">Turntable</a>
+    <a href="#ha">Home Assistant</a><a href="#light">LIGHT keys</a><a href="#mlgw">MasterLink Gateway</a>
+  </nav>
+  <span class="spacer"></span>
+  <span class="chip warn" id="dirty-chip" hidden>unsaved changes</span>
+  <button id="revert" hidden>Revert</button>
+  <button id="save" class="primary" hidden>Save</button>
+</div></header>
+<main>
+  <div id="banner"></div>
+  <div id="page"></div>
+</main>
+<script>
+"use strict";
+// ---- state ------------------------------------------------------------------
+let meta = {keys: {}, sources: {}, light_keys: [], providers: []};
+let bridge = null, bridgeSaved = "";          // /etc/ml-source-bridge.toml model
+let mlgw = null, mlgwSaved = "";              // MLGW devices
+let bus = [], statusTimer = null;
+const $ = (s) => document.querySelector(s);
+const hex = (n) => "0x" + Number(n).toString(16).toUpperCase().padStart(2, "0");
+const srcLabel = (b) => meta.sources[String(b)] || hex(b);
+const tab = () => (location.hash || "#status").slice(1);
+
+function el(tag, attrs = {}, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+    else if (k === "value") e.value = v ?? "";
+    else if (k === "checked") e.checked = !!v;
+    else if (v !== false && v != null) e.setAttribute(k, v === true ? "" : v);
+  }
+  for (const k of kids.flat()) if (k != null && k !== false) e.append(k.nodeType ? k : document.createTextNode(k));
+  return e;
+}
+// replaceChildren() takes neither arrays nor null -- flatten and filter.
+function put(node, ...kids) { node.replaceChildren(...kids.flat(Infinity).filter((k) => k != null && k !== false)); }
+function banner(kind, text) { $("#banner").replaceChildren(text ? el("div", {class: "banner " + kind}, text) : ""); }
+async function api(path, opts = {}) {
+  const r = await fetch(path, {cache: "no-store", ...opts});
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) { const e = new Error(body.error || (body.problems || []).join("\n") || r.statusText); e.body = body; throw e; }
+  return body;
+}
+const strip = (c) => JSON.parse(JSON.stringify(c, (k, v) => k.startsWith("_") ? undefined : v));
+const bridgeDirty = () => bridge && JSON.stringify(strip(bridge)) !== bridgeSaved;
+const mlgwDirty = () => mlgw && JSON.stringify(strip(mlgw)) !== mlgwSaved;
+
+function updateBar() {
+  const area = tab() === "status" ? null : (tab() === "mlgw" && mlgwDirty() && !bridgeDirty() ? "mlgw" : "bridge");
+  const dirty = bridgeDirty() || mlgwDirty();
+  $("#dirty-chip").hidden = !dirty;
+  $("#save").hidden = $("#revert").hidden = !area;
+  $("#save").disabled = !dirty;
+  document.title = (dirty ? "• " : "") + "mdtv2";
+}
+const changed = () => updateBar();
+
+// ---- small widgets ------------------------------------------------------------
+function check(obj, key, label, hint) {
+  return el("label", {class: "f"}, el("input", {type: "checkbox", checked: obj[key],
+    onchange: (e) => { obj[key] = e.target.checked; changed(); render(); }}), label,
+    hint ? el("span", {class: "hint"}, " " + hint) : null);
+}
+function text(obj, key, label, attrs = {}) {
+  return el("label", {class: "f stack grow"}, label, el("input", {value: obj[key], ...attrs,
+    oninput: (e) => { obj[key] = attrs.type === "number" ? Number(e.target.value) : e.target.value; changed(); }}));
+}
+function codeSelect(table, value, onchange, fallback) {
+  const s = el("select", {onchange: (e) => onchange(parseInt(e.target.value))});
+  const codes = Object.keys(table).map(Number);
+  if (value != null && !codes.includes(value)) codes.push(value);
+  codes.sort((a, b) => a - b);
+  for (const c of codes) s.append(el("option", {value: c, selected: c === value}, `${hex(c)}  ${table[String(c)] || fallback}`));
+  return s;
+}
+
+// ---- Status -------------------------------------------------------------------
+async function renderStatus(page) {
+  let st;
+  try { st = await api("/api/status"); } catch (e) { banner("err", "Status: " + e.message); return; }
+  if (tab() !== "status") return;
+  const units = el("table", {}, el("tbody", {}, Object.entries(st.units).map(([u, s]) =>
+    el("tr", {}, el("td", {}, u), el("td", {}, el("span", {class: "chip " + (s === "active" ? "ok" : s === "failed" ? "err" : "")}, s))))));
+  const np = Object.values(st.nowplaying || {}).sort((a, b) => a.source_byte.localeCompare(b.source_byte)).map((n) =>
+    el("div", {class: "card"}, el("h2", {}, `${n.source} `, el("span", {class: "chip " + (n.state === "playing" ? "ok" : "")}, n.state)),
+      n.state === "idle" ? el("div", {class: "hint"}, "nothing playing") :
+      el("div", {class: "np"}, el("span", {class: "hint"}, "Provider"), el("span", {}, `${n.display || n.provider}`),
+        el("span", {class: "hint"}, "Title"), el("span", {}, n.title || "–"),
+        el("span", {class: "hint"}, "Artist"), el("span", {}, n.artist || "–"),
+        el("span", {class: "hint"}, "Album"), el("span", {}, n.album || "–"))));
+  const m = st.mlgw;
+  put(page, 
+    el("div", {class: "card"}, el("h2", {}, "Services"), units),
+    el("div", {class: "card"}, el("h2", {}, "MasterLink Gateway emulation"),
+      m ? el("div", {class: "row"}, el("span", {class: "chip " + (m.sessions ? "ok" : "")}, `${m.sessions} HA connection${m.sessions === 1 ? "" : "s"}`),
+                                el("span", {class: "chip " + (m.listen_only ? "warn" : "ok")}, m.listen_only ? "listen-only" : "sending"),
+                                el("span", {class: "hint"}, `${m.devices} devices`))
+        : el("div", {class: "hint"}, "not running")),
+    el("h2", {style: "font-size:15px"}, "Now playing"), np.length ? np : el("div", {class: "hint"}, "no data"));
+}
+
+// ---- Sources ------------------------------------------------------------------
+function provList(s) { return Array.isArray(s.provider) ? s.provider : [s.provider]; }
+function renderSources(page) {
+  const b = bridge;
+  const wtPresets = ["vm", "am", "off"];
+  const wt = el("select", {onchange: (e) => {
+    if (e.target.value === "custom") {
+      const t = prompt("ML address to wake (hex, e.g. 0x06):", "0x");
+      if (t && /^0x[0-9a-f]{1,2}$/i.test(t.trim())) b.wake_target = t.trim();
+    } else b.wake_target = e.target.value;
+    changed(); render(); }});
+  for (const v of wtPresets) wt.append(el("option", {value: v, selected: b.wake_target === v}, {vm: "video master", am: "audio master", off: "off"}[v]));
+  if (!wtPresets.includes(b.wake_target)) wt.append(el("option", {value: b.wake_target, selected: true}, b.wake_target));
+  wt.append(el("option", {value: "custom"}, "ML address…"));
+
+  const sources = b.sources.map((s, i) => {
+    const provs = provList(s);
+    const boxes = meta.providers.map((p) => el("label", {class: "f"}, el("input", {type: "checkbox", checked: provs.includes(p),
+      onchange: (e) => {
+        let l = provList(s).filter((x) => x !== p);
+        if (e.target.checked) l.push(p);
+        if (!l.length) { e.target.checked = true; return; }
+        s.provider = l.length === 1 ? l[0] : l;
+        if (l.length < 2 || !l.includes(s.provider_default)) s.provider_default = l.length > 1 ? l[0] : null;
+        changed(); render(); }}), p));
+    const def = provs.length > 1 ? el("label", {class: "f"}, "Beo4 PLAY goes to",
+      (() => { const d = el("select", {onchange: (e) => { s.provider_default = e.target.value; changed(); }});
+        for (const p of provs) d.append(el("option", {value: p, selected: (s.provider_default || provs[0]) === p}, p));
+        return d; })()) : null;
+    return el("div", {class: "sub"},
+      el("div", {class: "row"},
+        el("label", {class: "f"}, "Source", codeSelect(meta.sources, s.source_byte, (v) => { s.source_byte = v; changed(); }, "source")),
+        text(s, "display_name", "Display name (B&O panel)", {maxlength: 11, placeholder: srcLabel(s.source_byte)}),
+        el("button", {class: "small danger", onclick: () => { b.sources.splice(i, 1); changed(); render(); }}, "Remove")),
+      el("div", {class: "row"}, el("span", {class: "hint"}, "Providers:"), boxes, def),
+      provs.length > 1 ? el("div", {class: "hint"}, "Several providers: whoever starts streaming last plays; the other is paused.") : null);
+  });
+  const used = [...new Set(b.sources.flatMap(provList))];
+  const displays = used.filter((p) => p !== "turntable").map((p) => el("label", {class: "f stack"}, p,
+    el("input", {value: b.provider_displays[p] || "", placeholder: "as source", maxlength: 16,
+      oninput: (e) => { if (e.target.value) b.provider_displays[p] = e.target.value; else delete b.provider_displays[p]; changed(); }})));
+
+  put(page, 
+    el("div", {class: "card"}, el("h2", {}, "Bridge"),
+      el("div", {class: "row"},
+        el("label", {class: "f"}, "Role", (() => { const r = el("select", {onchange: (e) => { b.role = e.target.value; changed(); }});
+          r.append(el("option", {value: "sc", selected: b.role === "sc"}, "Source Center (next to a B&O system)"),
+                   el("option", {value: "am", selected: b.role === "am"}, "Audio Master (for link speakers)")); return r; })()),
+        check(b, "broadcast_clock", "Broadcast clock")),
+      el("div", {class: "row"}, check(b, "auto_wake", "Auto-wake", "— a stream starting switches the system to its source"),
+        b.auto_wake ? el("label", {class: "f"}, "Wake", wt) : null)),
+    el("div", {class: "card"}, el("h2", {}, "Sources"), sources,
+      el("div", {class: "row"}, el("button", {class: "small", onclick: () => {
+        const free = [0x7a, 0xa1, 0x8d, 0x6f].find((x) => !b.sources.some((s) => s.source_byte === x)) ?? 0x7a;
+        b.sources.push({source_byte: free, provider: "airplay", provider_default: null, display_name: ""}); changed(); render(); }}, "Add source"))),
+    displays.length ? el("div", {class: "card"}, el("h2", {}, "Provider names on the display"),
+      el("div", {class: "hint"}, "Shown on the B&O panel while that provider plays on a multi-provider source."),
+      el("div", {class: "row"}, displays)) : null,
+    used.includes("mpd") ? el("div", {class: "card"}, el("h2", {}, "MPD"),
+      el("div", {class: "row"}, text(b.mpd, "host", "Host"), text(b.mpd, "port", "Port", {type: "number"}),
+        text(b.mpd, "password", "Password", {type: "password"}))) : null);
+}
+
+// ---- Turntable -------------------------------------------------------------------
+function renderTurntable(page) {
+  const t = bridge.turntable;
+  const on = bridge.sources.some((s) => provList(s).includes("turntable"));
+  put(page, 
+    on ? null : el("div", {class: "banner warn"}, "No source uses the turntable provider — set it on the Sources tab."),
+    el("div", {class: "card"}, el("h2", {}, "Turntable (DL'80 Beogram)"),
+      el("div", {class: "row"}, check(t, "loopback", "Audio loopback", "— ADC → DAC onto ML; off = control only")),
+      el("div", {class: "row"}, text(t, "metadata_title", "Panel text while nothing is recognized", {maxlength: 11}),
+        text(t, "pga_db", "ADC gain (dB)", {type: "number", step: 0.5, min: -12, max: 40})),
+      el("div", {class: "hint"}, "Keep the gain at 0 dB for line level (deck preamp or external phono stage)."),
+      el("div", {class: "row"}, check(t, "standby_ml_on_stop", "STANDBY on the deck switches the ML system off"))),
+    el("div", {class: "card"}, el("h2", {}, "Music recognition"),
+      el("div", {class: "row"}, check(t, "recognize", "Identify the record via Shazam")),
+      el("div", {class: "hint"}, "Shows title, artist, album and cover once two attempts agree. Uses shazamio, an unofficial Shazam client — " +
+        "after switching it on, run install.sh once so it installs shazamio."),
+    ),
+    el("div", {class: "hint"}, "Devices, RIAA and DL'80 codes stay as set in the config file."));
+}
+
+// ---- Home Assistant ----------------------------------------------------------------
+function renderHA(page) {
+  const h = bridge.ha_notifier;
+  const names = bridge.sources.map((s) => s.display_name || srcLabel(s.source_byte));
+  put(page, 
+    el("div", {class: "card"}, el("h2", {}, "Now-playing to Home Assistant"),
+      el("div", {class: "row"}, check(h, "enabled", "Send now-playing to a Home Assistant webhook")),
+      h.enabled ? [
+        el("div", {class: "row"}, text(h, "url", "Webhook URL", {placeholder: "http://homeassistant.local:8123/api/webhook/…"})),
+        el("div", {class: "row"}, el("span", {class: "hint"}, "Sources:"), names.map((n) => el("label", {class: "f"},
+          el("input", {type: "checkbox", checked: h.sources.includes(n), onchange: (e) => {
+            h.sources = e.target.checked ? [...h.sources, n] : h.sources.filter((x) => x !== n); changed(); }}), n))),
+        el("div", {class: "row"}, text(h, "cover_port", "Cover art port", {type: "number"})),
+        el("div", {class: "hint"}, "Each source needs its own sensor in HA's webhook block (home-assistant/templates/mdt_webhook.yaml).")] : null));
+}
+
+// ---- LIGHT keys --------------------------------------------------------------------
+function renderLight(page) {
+  const l = bridge.light_handler;
+  const rows = Object.entries(l.commands).map(([k, cmd]) => el("tr", {},
+    el("td", {}, (() => { const s = el("select", {onchange: (e) => {
+        const nk = e.target.value; if (nk === k || l.commands[nk] != null) { render(); return; }
+        const c = {}; for (const [a, b] of Object.entries(l.commands)) c[a === k ? nk : a] = b; l.commands = c; changed(); render(); }});
+      const keys = meta.light_keys.includes(k) ? meta.light_keys : [k, ...meta.light_keys];
+      for (const n of keys) s.append(el("option", {value: n, selected: n === k}, n)); return s; })()),
+    el("td", {style: "width:70%"}, el("input", {value: cmd, oninput: (e) => { l.commands[k] = e.target.value; changed(); }})),
+    el("td", {}, el("button", {class: "small danger", onclick: () => { delete l.commands[k]; changed(); render(); }}, "×"))));
+  put(page, 
+    el("div", {class: "card"}, el("h2", {}, "LIGHT + key → shell command"),
+      el("div", {class: "row"}, check(l, "enabled", "Run commands for Beo4 LIGHT + key"),
+        el("label", {class: "f"}, "Channel timeout (s)", el("input", {class: "num", type: "number", value: l.timeout_s,
+          oninput: (e) => { l.timeout_s = Number(e.target.value); changed(); }}))),
+      el("div", {class: "banner warn"}, "Commands run as the service user on the Pi. Anyone who can log in here can change them."),
+      el("div", {class: "table-wrap"}, el("table", {}, el("thead", {}, el("tr", {}, el("th", {}, "Key"), el("th", {}, "Command"), el("th"))),
+        el("tbody", {}, rows))),
+      el("button", {class: "small", onclick: () => {
+        const k = meta.light_keys.find((n) => l.commands[n] == null); if (!k) return;
+        l.commands[k] = ""; changed(); render(); }}, "Add key"),
+      el("div", {class: "hint"}, "Only masters that forward LIGHT do this — e.g. a BeoVision 10 does, a BeoVision 6 or BeoLab 2000 doesn't.")));
+}
+
+// ---- MasterLink Gateway --------------------------------------------------------------
+async function identify(dev, btn) {
+  const before = await api("/api/last-key").catch(() => ({}));
+  btn.replaceWith(el("span", {class: "identify"}, "Press any key on the Beo4 in this room …"));
+  for (let i = 0; i < 60; i++) {
+    await new Promise((r) => setTimeout(r, 1000));
+    const k = await api("/api/last-key").catch(() => ({}));
+    if (k.time && k.time > (before.time || 0)) { dev.mlAddress = k.address; banner("ok", `Identified ${hex(k.address)}.`); changed(); return render(); }
+  }
+  banner("warn", "No Beo4 key seen within 60 s. Not every device forwards keys to the bus."); render();
+}
+function addressSelect(dev) {
+  const s = el("select", {onchange: (e) => {
+    const v = e.target.value;
+    if (v === "custom") { const t = prompt("ML address (hex):", dev.mlAddress != null ? hex(dev.mlAddress) : "0x");
+      const n = t ? parseInt(t, 16) : NaN; if (!isNaN(n) && n >= 0 && n <= 255) dev.mlAddress = n; }
+    else if (v === "") delete dev.mlAddress; else dev.mlAddress = parseInt(v);
+    changed(); render(); }});
+  s.append(el("option", {value: "", selected: dev.mlAddress == null}, "— none —"));
+  const seen = new Set();
+  for (const b of bus) { seen.add(b.address);
+    const what = [b.class, b.name].filter(Boolean).join(", ");
+    s.append(el("option", {value: b.address, selected: b.address === dev.mlAddress},
+      `${hex(b.address)}${what ? "  (" + what + ")" : ""}${b.present === false ? "  – not present" : ""}`)); }
+  if (dev.mlAddress != null && !seen.has(dev.mlAddress)) s.append(el("option", {value: dev.mlAddress, selected: true}, `${hex(dev.mlAddress)}  (not seen on the bus)`));
+  s.append(el("option", {value: "custom"}, "other…"));
+  return s;
+}
+const seqText = (seq) => (seq || []).map((x) => typeof x === "object" ? "d" + (x.delay || 0) : String(x)).join(" ");
+const seqParse = (t) => t.trim().split(/[\s,]+/).filter(Boolean).map((x) => x[0] === "d" ? {delay: parseInt(x.slice(1)) || 0} : parseInt(x)).filter((x) => typeof x === "object" || !isNaN(x));
+function nextMLN() { let m = 0; for (const z of mlgw.zones) for (const p of z.products || []) m = Math.max(m, p.MLN || 0); return m + 1; }
+
+function sourceRows(dev) {
+  const rows = [];
+  (dev.sources || []).forEach((s, i) => {
+    rows.push(el("tr", {},
+      el("td", {}, el("input", {value: s.name, oninput: (e) => { s.name = e.target.value; changed(); }})),
+      el("td", {}, codeSelect(meta.keys, s.selectID, (v) => { s.selectID = v; changed(); }, "Beo4 key")),
+      el("td", {}, codeSelect(meta.sources, s.statusID, (v) => { s.statusID = v; changed(); }, "source")),
+      el("td", {}, (() => { const d = el("select", {onchange: (e) => { s.destination = parseInt(e.target.value); changed(); }});
+        for (const [v, t] of [[1, "Audio"], [0, "Video"]]) d.append(el("option", {value: v, selected: s.destination === v}, t)); return d; })()),
+      el("td", {}, el("button", {class: "small", onclick: () => { s._open = !s._open; render(); }}, `Favorites (${(s.channels || []).length})`)),
+      el("td", {}, el("button", {class: "small danger", onclick: () => { dev.sources.splice(i, 1); changed(); render(); }}, "×"))));
+    if (s._open) {
+      (s.channels || []).forEach((c, j) => rows.push(el("tr", {class: "fav"},
+        el("td", {}, el("input", {value: c.name, placeholder: "Station", oninput: (e) => { c.name = e.target.value; changed(); }})),
+        el("td", {colspan: 2}, el("input", {value: c.icon, placeholder: "Icon URL", oninput: (e) => { c.icon = e.target.value; changed(); }})),
+        el("td", {colspan: 2}, el("input", {value: seqText(c.selectSEQ), placeholder: "Keys, e.g. 1 d100 0", title: "Beo4 digits; d100 = 100 ms pause",
+          oninput: (e) => { c.selectSEQ = seqParse(e.target.value); changed(); }})),
+        el("td", {}, el("button", {class: "small danger", onclick: () => { s.channels.splice(j, 1); changed(); render(); }}, "×")))));
+      rows.push(el("tr", {class: "fav"}, el("td", {colspan: 6}, el("button", {class: "small", onclick: () => {
+        (s.channels = s.channels || []).push({name: "", icon: "", selectSEQ: []}); changed(); render(); }}, "Add favorite"))));
+    }
+  });
+  return rows;
+}
+function deviceBlock(zone, dev, di) {
+  return el("div", {class: "sub"},
+    el("div", {class: "row"},
+      el("input", {class: "grow", value: dev.name, placeholder: "Device name", oninput: (e) => { dev.name = e.target.value; changed(); }}),
+      el("label", {class: "f"}, "MLN", el("input", {class: "num", type: "number", min: 1, max: 255, value: dev.MLN,
+        oninput: (e) => { dev.MLN = parseInt(e.target.value); changed(); }})),
+      el("label", {class: "f"}, "ML address", addressSelect(dev)),
+      el("button", {class: "small", onclick: (e) => identify(dev, e.target)}, "Identify"),
+      el("button", {class: "small danger", onclick: () => { if (confirm(`Remove ${dev.name || "device"}?`)) { zone.products.splice(di, 1); changed(); render(); } }}, "Remove")),
+    el("div", {class: "table-wrap"}, el("table", {},
+      el("thead", {}, el("tr", {}, ["Source", "Beo4 select key", "ML source (status)", "Destination", "", ""].map((h) => el("th", {}, h)))),
+      el("tbody", {}, sourceRows(dev)))),
+    el("button", {class: "small", onclick: () => { (dev.sources = dev.sources || []).push({name: "", selectID: 0x94, statusID: 0x7a, destination: 1, channels: []}); changed(); render(); }}, "Add source"));
+}
+function renderMlgw(page) {
+  const g = bridge.mlgw;
+  const settings = el("div", {class: "card"}, el("h2", {}, "MasterLink Gateway emulation"),
+    el("div", {class: "hint"}, "The Pi answers Home Assistant's mlgw integration like a B&O MasterLink Gateway."),
+    el("div", {class: "row"}, check(g, "enabled", "Enabled"),
+      g.enabled ? check(g, "listen_only", "Listen only", "— commands from HA are not sent to the bus (while a real MLGW is still connected)") : null),
+    g.enabled ? el("div", {class: "row"}, text(g, "username", "Login (HA uses it)"),
+      el("label", {class: "f stack grow"}, g.password_set ? "New password (empty = keep)" : "Password",
+        el("input", {type: "password", value: g.password || "", oninput: (e) => { g.password = e.target.value; changed(); }}))) : null,
+    el("div", {class: "hint"}, "These settings are saved with the bridge config (Save at the top)."));
+  if (!g.enabled || !mlgw) {
+    put(page, settings, g.enabled ? el("div", {class: "hint"}, "Save to switch the emulation on; devices can be edited afterwards.") : null);
+    return;
+  }
+  const rooms = mlgw.zones.map((z, zi) => {
+    z.products = z.products || [];
+    return el("div", {class: "card"},
+      el("div", {class: "row"},
+        el("label", {class: "f"}, "Room", el("input", {class: "num", type: "number", min: 0, max: 255, value: z.number,
+          oninput: (e) => { z.number = parseInt(e.target.value); changed(); }})),
+        el("input", {class: "grow", value: z.name, placeholder: "Room name", style: "font-weight:600", oninput: (e) => { z.name = e.target.value; changed(); }}),
+        el("button", {class: "small", onclick: () => { z.products.push({MLN: nextMLN(), name: "", sources: []}); changed(); render(); }}, "Add device"),
+        el("button", {class: "small danger", onclick: () => { if (confirm(`Remove room ${z.name || z.number}?`)) { mlgw.zones.splice(zi, 1); changed(); render(); } }}, "Remove room")),
+      z.products.map((p, di) => deviceBlock(z, p, di)));
+  });
+  put(page, settings,
+    el("div", {class: "card"}, el("h2", {}, "Devices"),
+      el("div", {class: "hint"}, "Rooms, devices and sources as HA's integration sees them. Each device needs its ML address — pick it from the devices seen on the bus, or press Identify and any Beo4 key in that room. Saving the devices makes HA reload the integration."),
+      el("div", {class: "row"},
+        el("label", {class: "f"}, "Project", el("input", {value: mlgw.project || "", oninput: (e) => { mlgw.project = e.target.value; changed(); }})),
+        el("span", {class: "chip"}, mlgw.sn ? "SN " + mlgw.sn : "no serial"),
+        el("span", {class: "spacer"}),
+        el("button", {class: "small", onclick: () => { const n = Math.max(0, ...mlgw.zones.map((z) => z.number || 0)) + 1;
+          mlgw.zones.push({number: n, name: "", products: [], scenes: [], cameras: []}); changed(); render(); }}, "Add room"),
+        el("button", {class: "small", onclick: () => $("#import-file").click()}, "Import MLGW export…"),
+        el("button", {class: "small", onclick: () => { const a = el("a", {href: URL.createObjectURL(new Blob([JSON.stringify(strip(mlgw), null, 1)], {type: "application/json"})), download: "mlgw-devices.json"}); a.click(); }}, "Export"),
+        el("button", {class: "small primary", disabled: !mlgwDirty(), onclick: saveMlgw}, "Save devices"))),
+    rooms,
+    el("input", {type: "file", id: "import-file", accept: ".json", hidden: true, onchange: async (e) => {
+      const f = e.target.files[0]; if (!f) return;
+      try { mlgw = await api("/api/mlgw/import", {method: "POST", body: await f.text()}); changed(); render();
+        banner("warn", `Imported ${f.name}. ML addresses kept for known MLNs — check them, then "Save devices".`); }
+      catch (err) { banner("err", "Import failed: " + err.message); } }}));
+}
+
+// ---- load / save -------------------------------------------------------------------
+async function loadBridge() { bridge = await api("/api/bridge"); bridgeSaved = JSON.stringify(strip(bridge)); }
+async function loadMlgw() {
+  try { mlgw = await api("/api/mlgw/config"); mlgw.zones = mlgw.zones || []; mlgwSaved = JSON.stringify(strip(mlgw)); }
+  catch { mlgw = null; mlgwSaved = ""; }
+}
+async function saveBridge() {
+  try {
+    const r = await api("/api/bridge", {method: "PUT", headers: {"Content-Type": "application/json"}, body: JSON.stringify(strip(bridge))});
+    await loadBridge(); await loadMlgw();
+    banner("ok", !r.changed ? "Nothing changed." : "Saved." + (r.restarted.length ? " Restarting: " + r.restarted.join(", ") : ""));
+  } catch (e) { banner("err", "Not saved — the bridge rejected the config:\n" + e.message); }
+  render();
+}
+async function saveMlgw() {
+  try { await api("/api/mlgw/config", {method: "PUT", headers: {"Content-Type": "application/json"}, body: JSON.stringify(strip(mlgw))});
+    await loadMlgw(); banner("ok", "Devices saved. Home Assistant reloads the integration.");
+  } catch (e) { banner("err", "Devices not saved: " + e.message); }
+  render();
+}
+
+// ---- routing -------------------------------------------------------------------------
+function render() {
+  for (const a of document.querySelectorAll("nav a")) a.classList.toggle("active", a.getAttribute("href") === "#" + tab());
+  clearInterval(statusTimer);
+  const page = $("#page");
+  if (!bridge) return;
+  const t = tab();
+  if (t === "status") { renderStatus(page); statusTimer = setInterval(() => renderStatus(page), 5000); }
+  else if (t === "sources") renderSources(page);
+  else if (t === "turntable") renderTurntable(page);
+  else if (t === "ha") renderHA(page);
+  else if (t === "light") renderLight(page);
+  else if (t === "mlgw") renderMlgw(page);
+  updateBar();
+}
+window.addEventListener("hashchange", () => { banner(); render(); });
+$("#save").addEventListener("click", () => (bridgeDirty() ? saveBridge() : saveMlgw()));
+$("#revert").addEventListener("click", async () => { await loadBridge(); await loadMlgw(); banner(); render(); });
+window.addEventListener("beforeunload", (e) => { if (bridgeDirty() || mlgwDirty()) e.preventDefault(); });
+
+(async () => {
+  try {
+    meta = await api("/api/meta");
+    await loadBridge(); await loadMlgw();
+    bus = await api("/api/bus-devices").catch(() => []);
+  } catch (e) { banner("err", "Could not load: " + e.message); }
+  render();
+})();
+</script>
+</body>
+</html>

@@ -29,7 +29,10 @@ Behaviour:
     through. Only files the bridge has reported are served.
 
 Config: [ha_notifier] in /etc/ml-source-bridge.toml (see
-ml-source-bridge/config.toml.example). Exits 0 if disabled.
+ml-source-bridge/config.toml.example). While disabled it idles, waiting
+for mdt-web's restart request (redis link:ctl:restart) after a config
+change; on that request it exits with RESTART_EXIT so systemd
+(Restart=on-failure) starts it again with the new config.
 """
 from __future__ import annotations
 
@@ -55,6 +58,8 @@ import redis
 
 NOWPLAYING_KEY  = "state:nowplaying"
 NOWPLAYING_CHAN = "link:ml:nowplaying"
+CTL_RESTART     = "link:ctl:restart"
+RESTART_EXIT    = 3          # non-zero on purpose: Restart=on-failure
 
 DEFAULT_CONFIG = "/etc/ml-source-bridge.toml"
 
@@ -271,6 +276,23 @@ class Notifier:
 
 # ---- main -------------------------------------------------------------------
 
+def restart_listener(host: str, port: int, stop: list, restart: list) -> None:
+    """Thread: end the process when mdt-web asks for a restart."""
+    while not stop[0]:
+        try:
+            ps = redis.StrictRedis(host=host, port=port, decode_responses=True
+                                   ).pubsub(ignore_subscribe_messages=True)
+            ps.subscribe(CTL_RESTART)
+            while not stop[0]:
+                m = ps.get_message(timeout=1.0)
+                if m and m.get("data") in ("ha-notifier", "all"):
+                    log("restart requested (config changed)")
+                    restart[0] = stop[0] = True
+                    return
+        except redis.exceptions.RedisError:
+            time.sleep(2.0)
+
+
 def run(cfg: Config, stop: list[bool],
         covers: Optional[Covers] = None) -> None:
     n = Notifier(cfg, covers)
@@ -311,15 +333,25 @@ def main() -> int:
     args = ap.parse_args()
 
     cfg = load_config(args.config)
-    if cfg is None:
-        log(f"[ha_notifier] not enabled in {args.config} -- nothing to do")
-        return 0
 
-    stop = [False]
+    stop, restart = [False], [False]
     def _stop(*_):
         stop[0] = True
     signal.signal(signal.SIGINT, _stop)
     signal.signal(signal.SIGTERM, _stop)
+
+    if cfg is None:
+        log(f"[ha_notifier] not enabled in {args.config} -- idle until the "
+            f"config changes")
+        with open(args.config, "rb") as f:
+            raw = tomllib.load(f)
+        restart_listener(str(raw.get("redis_host", "localhost")),
+                         int(raw.get("redis_port", 6379)), stop, restart)
+        return RESTART_EXIT if restart[0] else 0
+
+    threading.Thread(target=restart_listener,
+                     args=(cfg.redis_host, cfg.redis_port, stop, restart),
+                     name="ctl-restart", daemon=True).start()
 
     covers = None
     if cfg.cover_port:
@@ -332,7 +364,7 @@ def main() -> int:
             covers = None
 
     run(cfg, stop, covers)
-    return 0
+    return RESTART_EXIT if restart[0] else 0
 
 
 if __name__ == "__main__":

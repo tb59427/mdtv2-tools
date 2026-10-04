@@ -381,6 +381,73 @@ def _stream_watcher_factory(role: Role, ctx: Context,
     return watch
 
 
+# ---- config check / restart on request --------------------------------------
+
+# mdt-web publishes a service name here after saving the config; the named
+# service exits cleanly and systemd (Restart=always) starts it again with
+# the new config. No root needed.
+CTL_RESTART = "link:ctl:restart"
+
+
+def check_config(cfg: dict, args) -> list[str]:
+    """Everything main() would reject about `cfg`, without touching the bus
+    or starting anything. Returns the problems found (empty = OK)."""
+    problems: list[str] = []
+
+    def attempt(what: str, fn):
+        try:
+            return fn()
+        except SystemExit as e:
+            problems.append(f"{what}: {e}")
+        except Exception as e:
+            problems.append(f"{what}: {type(e).__name__}: {e}")
+        return None
+
+    role = cfg.get("role")
+    if role not in (None, "am", "sc"):
+        problems.append(f"role {role!r} must be 'am' or 'sc'")
+    attempt("wake_target", lambda: parse_wake_target(cfg.get("wake_target")))
+    sources = attempt("sources", lambda: _resolve_sources(cfg, args)) or []
+    if not sources and not problems:
+        problems.append("no [[sources]] configured")
+    seen: set[int] = set()
+    for entry in sources:
+        src = entry["source_byte"]
+        if src in seen:
+            problems.append(f"source_byte 0x{src:02x} configured twice")
+        seen.add(src)
+        display = entry.get("display_name") or _DEFAULT_DISPLAY.get(src, f"0x{src:02x}")
+        attempt(f"source 0x{src:02x}", lambda e=entry, d=display: make_provider(
+            e.get("provider", "airplay"), e["source_byte"], d, cfg=cfg,
+            provider_default=e.get("provider_default")))
+    light = cfg.get("light_handler") or {}
+    if light.get("enabled", False):
+        attempt("light_handler", lambda: LightHandler(
+            commands=light.get("commands") or {},
+            timeout_s=float(light.get("timeout_s", 20.0))))
+    return problems
+
+
+def _restart_listener(redis_host: str, redis_port: int,
+                      stop: threading.Event) -> None:
+    """Thread: exit cleanly when mdt-web asks for a restart."""
+    import redis
+    while not stop.is_set():
+        try:
+            ps = redis.StrictRedis(host=redis_host, port=redis_port,
+                                   decode_responses=True).pubsub(
+                ignore_subscribe_messages=True)
+            ps.subscribe(CTL_RESTART)
+            while not stop.is_set():
+                m = ps.get_message(timeout=1.0)
+                if m and m.get("data") in ("ml-source-bridge", "all"):
+                    log("[main] restart requested (config changed) -- exiting")
+                    stop.set()
+                    return
+        except Exception:
+            stop.wait(2.0)
+
+
 # ---- main loop --------------------------------------------------------------
 
 def main() -> int:
@@ -411,9 +478,24 @@ def main() -> int:
                          "pass an empty string to disable file logging)")
     ap.add_argument("--debug", action="store_true",
                     help="set log level to DEBUG (very verbose)")
+    ap.add_argument("--check-config", action="store_true",
+                    help="validate the config (sources, providers, wake "
+                         "target, LIGHT keys) and exit: 0 = OK, 1 = problems "
+                         "(printed). Touches neither the bus nor any backend.")
     args = ap.parse_args()
 
     # ---- merge config + CLI ------------------------------------------------
+    if args.check_config:
+        try:
+            cfg = load_config(args.config)
+        except (OSError, ValueError, SystemExit) as e:   # TOMLDecodeError is a ValueError
+            print(f"config: {e}")
+            return 1
+        problems = check_config(cfg, args)
+        for p in problems:
+            print(p)
+        return 1 if problems else 0
+
     cfg = load_config(args.config)
 
     # Configure logging early so even early-startup messages land in the
@@ -468,6 +550,8 @@ def main() -> int:
 
     bus_real = Bus(host=redis_host, port=redis_port, stop=stop)
     bus = _DryRunBus(bus_real) if args.dry_run else bus_real
+    threading.Thread(target=_restart_listener, args=(redis_host, redis_port, stop),
+                     name="ctl-restart", daemon=True).start()
 
     role = make_role(role_name)
     setattr(role, "wake_target", wake_target)

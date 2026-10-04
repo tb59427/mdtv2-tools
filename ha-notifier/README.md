@@ -29,8 +29,9 @@ url     = "http://homeassistant.local:8123/api/webhook/<webhook_id>"
 sources = ["N.MUSIC"]
 ```
 
-Then `sudo systemctl restart ha-notifier.service`. With `enabled = false`
-(or no section) the service exits right away and stays down.
+Then `sudo systemctl restart ha-notifier.service` -- or set it in the web
+UI, which restarts it for you. With `enabled = false` (or no section) the
+service idles until the config changes.
 
 ## Behaviour
 

@@ -346,3 +346,44 @@ display_name = "N.RADIO"        # optional; up to 11 chars ASCII
 #                            # how the browser reaches the Pi; default
 #                            # http://<hostname>.local:<cover_port>. Set an IP
 #                            # here if .local doesn't resolve on your clients.
+
+
+# ---- web UI (mdt-web.service) -----------------------------------------------
+# Configure everything in this file from a browser: http://<pi>/ -- sources
+# and providers, turntable, Home Assistant, LIGHT keys, MasterLink Gateway.
+# Saving validates the config with the bridge itself, keeps a backup, keeps
+# the comments in this file, and restarts only what changed.
+#
+# Anyone who can log in can change the LIGHT-key commands (shell commands
+# run as the service user) -- use a good password. After adding this
+# section: sudo systemctl restart mdt-web
+#
+# [web]
+# enabled  = true
+# port     = 80
+# username = "admin"
+# password = "<choose one>"
+# state_dir = "/var/lib/mdt-web"   # backups of this file, temp files
+
+
+# ---- MasterLink Gateway emulation (mlgw-emu.service) -----------------------
+# The Pi answers Home Assistant's mlgw integration (github.com/giachello/mlgw)
+# like a B&O MasterLink Gateway: rooms and devices with their sources, Beo4
+# commands from HA onto the bus, mlgw.ML_telegram events, and the MLGW's own
+# events (LIGHT/CONTROL, all standby, source / picture & sound status of
+# masters). Needs [web] too: HA fetches the device list from port 80.
+# Devices (rooms, MLN, ML bus address, sources, favorites) are edited in the
+# web UI -- or import a real MLGW's export (mlgwpservices.json) there.
+# Guide: docs/mlgw-emulation.md
+#
+# [mlgw]
+# enabled     = true
+# listen_only = true            # true while a real MLGW is still on the bus:
+#                               # commands from HA are logged, not sent
+# username    = "admin"         # HA's integration logs in with these
+# password    = "<choose one>"
+# devices_file = "/var/lib/mdt-mlgw/devices.json"
+# serial      = ""              # default: the "sn" from the device config --
+#                               # keep the real MLGW's to keep HA's entities
+# extended_status = false       # true: source status for link rooms too
+#                               # (a real MLGW only reports masters)

@@ -127,8 +127,13 @@ def decode_source_status(t: Telegram) -> List[Tuple[str, str]]:
     out.append(("CH_TRACK", ch_track))
     if _need(t, 22):
         out.append(("ACTIVITY", f"0x{t.raw[21]:02x} {lookup(ml_state_dict, t.raw[21])}"))
+    # Byte 22 is the source type, byte 23 the picture format -- as the mlgw
+    # HA integration decodes it, and confirmed against what a real MLGW
+    # reported for the same telegrams (00 -> "Not known", 03 -> "16:9").
     if _need(t, 23):
-        out.append(("PICTURE_ID", f"0x{t.raw[22]:02x} {lookup(ml_pictureformatdict, t.raw[22])}"))
+        out.append(("SOURCE_TYPE", f"0x{t.raw[22]:02x}"))
+    if _need(t, 24):
+        out.append(("PICTURE_ID", f"0x{t.raw[23]:02x} {lookup(ml_pictureformatdict, t.raw[23])}"))
     return out
 
 
@@ -354,32 +359,27 @@ def decode_pc_present(t: Telegram) -> List[Tuple[str, str]]:
 
 
 def decode_pict_sound_status(t: Telegram) -> List[Tuple[str, str]]:
-    """0x98 PICT_SOUND_STATUS -- the master broadcasts current audio + picture
-    state. Per const.py, payload bytes carry:
-        [0] sound bits 0-1 (0=ok,1=muted), stereo mode bits 2-3
-        [1] speaker mode
-        [2] audio volume
-        [3] picture format identifier
-        [4] screen bitmap (mute/active per screen, cinema mode)
-    The legacy decoder only read 2 of these; this version exposes all five."""
+    """0x98 PICT_SOUND_STATUS -- a master reports audio + picture state (seen
+    addressed to the MLGW, 0xF0). Payload bytes (telegram bytes 9..13),
+    confirmed against a real MLGW's pict_sound_status events for the same
+    telegrams (02 02 03 14 03 -> not muted, stereo, front surround,
+    volume 20, screen 1 active):
+        [0] bit 0 mute, bit 1 stereo
+        [1] not identified yet
+        [2] speaker mode
+        [3] volume
+        [4] bit 0 screen 1 active (0xFF right after power-on)
+    The previous layout here (volume at [2]) was one byte off."""
     if not _need(t, 14):
-        # Fall back to the legacy short read if the full layout isn't present.
-        if not _need(t, 13):
-            return [("ERROR", "telegram too short")]
-        return [
-            ("MUTE",   f"0x{t.raw[10]:02x}"),
-            ("VOLUME", f"0x{t.raw[12]:02x} ({t.raw[12]} dec)"),
-        ]
-    snd_byte = t.raw[9]
-    sound_state = "muted" if (snd_byte & 0x03) else "ok"
-    stereo      = (snd_byte >> 2) & 0x03
+        return [("ERROR", "telegram too short")]
+    snd = t.raw[9]
     return [
-        ("SOUND",    sound_state),
-        ("STEREO",   f"0x{stereo:02x}"),
-        ("SPK_MODE", f"0x{t.raw[10]:02x}"),
-        ("VOLUME",   f"{t.raw[11]} (0x{t.raw[11]:02x})"),
-        ("PICT_FMT", f"0x{t.raw[12]:02x} {lookup(ml_pictureformatdict, t.raw[12])}"),
+        ("SOUND",    "muted" if snd & 0x01 else "ok"),
+        ("STEREO",   "yes" if snd & 0x02 else "no"),
+        ("SPK_MODE", f"0x{t.raw[11]:02x}"),
+        ("VOLUME",   f"{t.raw[12]} (0x{t.raw[12]:02x})"),
         ("SCREENS",  f"0x{t.raw[13]:02x}"),
+        ("BYTE_10",  f"0x{t.raw[10]:02x}"),
     ]
 
 

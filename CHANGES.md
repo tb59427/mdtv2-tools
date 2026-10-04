@@ -75,14 +75,42 @@ here is Philip's work, unchanged.
   sensors and a button-card for N.MUSIC, including streams that don't come
   from Music Assistant. Guide: [docs/home-assistant.md](docs/home-assistant.md).
 
+### Web UI
+
+- `web/mdt_web.py` (new service `mdt-web`, port 80, Digest login, opt-in
+  via `[web]`): status, sources and providers, turntable, HA notifier,
+  LIGHT keys, MLGW emulation. Edits `/etc/ml-source-bridge.toml` with
+  tomlkit (only changed values; comments and unknown settings kept), after
+  the bridge validated it with the new `ml_source_bridge.py --check-config`;
+  keeps backups. Guide: [docs/web-ui.md](docs/web-ui.md).
+- Services restart on request over redis `link:ctl:restart`, no root:
+  the bridge exits (Restart=always), ha-notifier exits with code 3
+  (Restart=on-failure) and idles while disabled instead of exiting.
+
+### MasterLink Gateway emulation
+
+- `mlgw-emu/` (new service `mlgw-emu`, opt-in via `[mlgw]`): the Pi answers
+  Home Assistant's mlgw integration like a B&O MasterLink Gateway -- MLGW
+  protocol on port 9000 (login, Beo4 commands by MLN onto the bus), telnet
+  `_MLLOG` on port 23 (every ML telegram), device list via mdt-web, and the
+  MLGW's events derived from the bus (LIGHT/CONTROL, all standby, source and
+  picture & sound status), verified side by side against a real MLGW.
+  Devices with their ML bus addresses are edited in the web UI (import of a
+  real MLGW's export). Works around the integration's address-learning race.
+  Guide: [docs/mlgw-emulation.md](docs/mlgw-emulation.md).
+- `ml-debug`: picture format (SOURCE STATUS) and the PICT/SOUND STATUS
+  fields were decoded one byte off; fixed.
+
 ### Install and security
 
 - `install.sh` deploys and enables `ha-notifier`; installs the Sendspin sudo
   rule when a `sendspin` user exists and removes an older rule that allowed
   `/usr/bin/sh` as that user.
-- `/etc/ml-source-bridge.toml` is now `root:mdt 0640` (it can hold the
-  webhook URL and tokens); the bridge unit gets `SupplementaryGroups=mdt`
-  to keep reading it.
+- `/etc/ml-source-bridge.toml` is now `root:mdt 0660` (it can hold the
+  webhook URL and tokens; group-writable for the web UI); the bridge unit
+  gets `SupplementaryGroups=mdt` to keep reading it.
+- `install.sh` also deploys and enables `mlgw-emu` and `mdt-web` (both idle
+  until enabled in the config) and installs `python3-tomlkit`.
 - `bootstrap.sh` installs from this fork by default and switches an existing
   clone's `origin` over (set `REPO_URL` for the original).
 
@@ -90,6 +118,9 @@ here is Philip's work, unchanged.
 
 - [docs/providers.md](docs/providers.md) -- AirPlay, Sendspin, MPD, ALSA.
 - [docs/home-assistant.md](docs/home-assistant.md) -- HA setup.
+- [docs/web-ui.md](docs/web-ui.md) -- the web UI.
+- [docs/mlgw-emulation.md](docs/mlgw-emulation.md) -- replacing a B&O
+  MasterLink Gateway for Home Assistant.
 - [docs/testing.md](docs/testing.md) -- running a checkout as a test
   instance next to the installed version.
 - README, bridge README and `config.toml.example` updated accordingly.

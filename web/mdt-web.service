@@ -1,0 +1,25 @@
+[Unit]
+Description=mdt v2 web UI (bridge and MLGW emulation config)
+Documentation=https://github.com/tb59427/mdtv2-tools/blob/master/docs/web-ui.md
+Wants=redis-server.service
+After=network.target redis-server.service
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=2s
+User=mdt
+Group=mdt
+# Port 80 needs this one capability -- nothing else, no root.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+# /var/lib/mdt-web: config backups, candidate files for --check-config.
+# Writes /etc/ml-source-bridge.toml (root:mdt 0660, set by install.sh) and
+# /var/lib/mdt-mlgw/devices.json.
+StateDirectory=mdt-web
+WorkingDirectory=/opt/mdt-tools/web
+ExecStart=/usr/bin/python3 -u /opt/mdt-tools/web/mdt_web.py --config /etc/ml-source-bridge.toml
+
+[Install]
+WantedBy=multi-user.target

@@ -19,7 +19,7 @@
 #                                            our HAT is compatible with)
 #   3. Patches /boot/firmware/cmdline.txt to drop the serial console.
 #   4. Disables conflicting services (serial-getty, hciuart).
-#   5. Copies code to /opt/mdt-tools/{broker,ml-source-bridge,ml-debug,ha-notifier,mcu-firmware}.
+#   5. Copies code to /opt/mdt-tools/{broker,ml-source-bridge,ml-debug,ha-notifier,mlgw-emu,web,...}.
 #   6. Installs systemd unit files + the shairport-sync D-Bus policy.
 #   7. Sets up a hidden pymcuprog venv at /opt/mdt-tools/.pymcuprog-venv/
 #      (used transparently by mcu-firmware/flash.sh).
@@ -111,6 +111,7 @@ APT_PKGS=(
     python3-numpy         # software RIAA (turntable provider + phono capture)
     python3-scipy         # ~72 MB, but RIAA is unusable without it
     python3-soundfile     # dl-scripts phono capture reads/writes WAV
+    python3-tomlkit       # mdt-web edits the bridge config keeping comments
     ffmpeg                # dl-scripts encode their captures to FLAC
 )
 # Note: python3-numpy / python3-scipy / python3-soundfile / ffmpeg are only
@@ -228,7 +229,7 @@ RSYNC_OPTS=(-a --delete
     --exclude '.pymcuprog-venv'
     --exclude '.recognize-venv'
 )
-for d in broker ml-source-bridge ml-debug dl-debug state-tracker ha-notifier mcu-firmware; do
+for d in broker ml-source-bridge ml-debug dl-debug state-tracker ha-notifier mlgw-emu web mcu-firmware; do
     rsync "${RSYNC_OPTS[@]}" "$SOURCE_DIR/$d/" "$INSTALL_ROOT/$d/"
 done
 chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_ROOT"
@@ -240,7 +241,9 @@ note "systemd unit files"
 for src_unit in "$SOURCE_DIR/broker/mdtv2-broker.service" \
                 "$SOURCE_DIR/ml-source-bridge/ml-source-bridge.service" \
                 "$SOURCE_DIR/state-tracker/mdt-state.service" \
-                "$SOURCE_DIR/ha-notifier/ha-notifier.service"; do
+                "$SOURCE_DIR/ha-notifier/ha-notifier.service" \
+                "$SOURCE_DIR/mlgw-emu/mlgw-emu.service" \
+                "$SOURCE_DIR/web/mdt-web.service"; do
     name=$(basename "$src_unit")
     dst="/etc/systemd/system/$name"
     if cmp -s "$src_unit" "$dst" 2>/dev/null; then
@@ -316,18 +319,20 @@ fi
 if [[ -f $BRIDGE_TOML ]]; then
     skip "$BRIDGE_TOML already exists -- not touching"
 else
-    install -m 640 -o root -g "$SERVICE_USER" \
+    install -m 660 -o root -g "$SERVICE_USER" \
         "$SOURCE_DIR/ml-source-bridge/config.toml.example" "$BRIDGE_TOML"
     NEED_CONFIG_EDIT=1
     ok "wrote default $BRIDGE_TOML (edit before enabling the service)"
 fi
 # The config can hold secrets (HA webhook URL, tokens in [light_handler]
-# commands): readable by root and the service user only. Applied on every
-# run so existing installs get tightened too.
-if [[ $(stat -c '%U:%G %a' "$BRIDGE_TOML") != "root:$SERVICE_USER 640" ]]; then
+# commands): no access for others. Group-writable so mdt-web (running as
+# the service user) can save it -- that user already runs the LIGHT-key
+# commands, so it gains nothing it couldn't do before. Applied on every
+# run so existing installs get it too.
+if [[ $(stat -c '%U:%G %a' "$BRIDGE_TOML") != "root:$SERVICE_USER 660" ]]; then
     chown "root:$SERVICE_USER" "$BRIDGE_TOML"
-    chmod 640 "$BRIDGE_TOML"
-    ok "$BRIDGE_TOML -> root:$SERVICE_USER 0640"
+    chmod 660 "$BRIDGE_TOML"
+    ok "$BRIDGE_TOML -> root:$SERVICE_USER 0660"
 fi
 
 # ---------- 9. pymcuprog venv -----------------------------------------------
@@ -383,9 +388,11 @@ if (( NEED_SHAIRPORT_RESTART )); then
 fi
 
 # Enable + start (or restart) the services. Fresh install: enable+now.
-# Update install: restart to pick up new code. ha-notifier exits right
-# away (and stays down) until [ha_notifier] is enabled in the config.
-for svc in mdtv2-broker.service ml-source-bridge.service mdt-state.service ha-notifier.service; do
+# Update install: restart to pick up new code. ha-notifier, mlgw-emu and
+# mdt-web idle until their section ([ha_notifier], [mlgw], [web]) is
+# enabled in the config.
+for svc in mdtv2-broker.service ml-source-bridge.service mdt-state.service \
+           ha-notifier.service mlgw-emu.service mdt-web.service; do
     if systemctl is-enabled --quiet "$svc" 2>/dev/null; then
         note "restarting $svc"
         systemctl restart "$svc"
@@ -403,8 +410,9 @@ echo "  services: $(systemctl is-active mdtv2-broker.service 2>/dev/null) mdtv2-
 echo "  logs:     sudo journalctl -u mdtv2-broker.service -u ml-source-bridge.service -u mdt-state.service -f"
 echo "  state:    redis-cli GET state:ml | state:dl80 | state:dl86"
 echo "            redis-cli HGETALL state:nowplaying"
-echo "  HA:       enable [ha_notifier] in /etc/ml-source-bridge.toml, then"
-echo "            sudo systemctl restart ha-notifier.service"
+echo "  web UI:   add [web] with a password to /etc/ml-source-bridge.toml"
+echo "            (see config.toml.example), then: sudo systemctl restart mdt-web"
+echo "            -> http://$(hostname).local/ -- everything else can be set there"
 if (( NEED_CONFIG_EDIT )); then
     echo
     echo "  /etc/ml-source-bridge.toml was created with default values --"

@@ -6,8 +6,9 @@ After=network-online.target redis-server.service ml-source-bridge.service
 
 [Service]
 Type=simple
-# on-failure, not always: with [ha_notifier] disabled the daemon exits 0
-# on purpose and should stay down.
+# on-failure: a restart request after a config change (from mdt-web)
+# exits with code 3, a stop exits 0. While [ha_notifier] is disabled the
+# daemon idles, waiting for such a request.
 Restart=on-failure
 RestartSec=5s
 # Reads redis and talks HTTP; needs neither serial nor audio.
