@@ -19,12 +19,15 @@ BeoSound 3200 as audio master, link rooms):
                       -> on that source, any SOURCE STATUS for a source ->
                       every device on it, RELEASE from it -> standby.
   0x03 Pict&sound     PICT/SOUND STATUS (0x98), which a master sends to the
-                      MLGW address: volume (payload byte 3 -- seen counting
-                      20..28 while the volume was raised) and speaker mode
-                      (byte 1). The other bytes aren't confirmed yet and go
-                      out as 0 (not muted, screens inactive) -- the
-                      integration turns a player on when a screen is
-                      reported active, so a wrong guess would be worse.
+                      MLGW address. Payload bytes, matched against what a
+                      real MLGW reported for the same telegrams
+                      (02 02 03 14 03 -> not muted, stereo, front surround,
+                      volume 20, screen 1 active):
+                        [0] bit0 mute, bit1 stereo   [2] speaker mode
+                        [3] volume                   [4] bit0 screen 1 active
+                      Screen 2 and cinema mode weren't seen and go out as 0.
+
+Like the real MLGW, every status telegram is reported -- repeats included.
 
 Telegrams arrive without checksum / end marker: to, from, 0x01, type,
 src_dest, orig_src, 0x00, payload type, payload length, payload...
@@ -71,23 +74,15 @@ class EventSynth:
         self.on_source: dict[int, int] = {}          # MLN -> source byte
         self.status: dict[int, tuple] = {}           # source -> (medium, track, activity, picture)
         self.last_key: Optional[dict] = None         # latest Beo4 key seen (UI "identify")
-        self._sent: dict[tuple, bytes] = {}          # (type, MLN) -> last status frame
 
     # ---- event builders ----------------------------------------------------
-
-    def _emit_status(self, key: tuple, frame: bytes) -> None:
-        """Status frames only on change: the bus often repeats a status
-        telegram (to several addresses), a real MLGW reports changes."""
-        if self._sent.get(key) != frame:
-            self._sent[key] = frame
-            self.emit(frame)
 
     def _source_status(self, mln: int, source: int) -> None:
         medium, track, activity, picture = self.status.get(
             source, (0, 0, ACT_UNKNOWN, 0))
         if source == 0:
             activity = ACT_STANDBY
-        self._emit_status((0x02, mln), mlgw_frame(0x02, bytes([
+        self.emit(mlgw_frame(0x02, bytes([
             mln, source, (medium >> 8) & 0xFF, medium & 0xFF,
             (track >> 8) & 0xFF, track & 0xFF, activity, picture])))
 
@@ -103,7 +98,6 @@ class EventSynth:
             elif pt in (PT_RELEASE, PT_STANDBY) and to == ADDR_ALL and frm in MASTERS:
                 self.log("all standby")
                 self.on_source.clear()
-                self._sent.clear()
                 self.emit(mlgw_frame(0x05, b""))
             elif pt == PT_RELEASE and self.extended:
                 dev = self.lookup(frm)
@@ -121,10 +115,11 @@ class EventSynth:
                     to == ADDR_MLGW or self.extended):
                 dev = self.lookup(frm)
                 if dev:
-                    # mln, sound, speaker mode, volume, scr1 mute/active,
+                    # mln, mute, speaker mode, volume, scr1 mute/active,
                     # scr2 mute/active, cinema, stereo
-                    self._emit_status((0x03, dev[0]), mlgw_frame(0x03, bytes([
-                        dev[0], 0x00, t[10], t[12], 0, 0, 0, 0, 0, 0])))
+                    self.emit(mlgw_frame(0x03, bytes([
+                        dev[0], t[9] & 0x01, t[11], t[12], 0, t[13] & 0x01,
+                        0, 0, 0, (t[9] >> 1) & 0x01])))
             elif pt == PT_BEO4_KEY and len(t) >= 12:
                 self.last_key = {"address": frm, "source": t[10],
                                  "key": t[11], "time": now}
@@ -140,7 +135,7 @@ class EventSynth:
         source = t[10]
         medium = t[18] * 256 + t[17]
         track = t[19] if t[8] < 27 or len(t) < 38 else t[36] * 256 + t[37]
-        self.status[source] = (medium, track, t[21], t[22])
+        self.status[source] = (medium, track, t[21], t[23])   # activity, picture format
         dev = self.lookup(frm)
         if to == ADDR_MLGW:
             # A master telling the MLGW about its own source.
