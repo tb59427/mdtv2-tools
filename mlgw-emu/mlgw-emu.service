@@ -1,0 +1,25 @@
+[Unit]
+Description=mdt v2 MasterLink Gateway emulation for Home Assistant's mlgw integration
+Documentation=https://github.com/tb59427/mdtv2-tools/blob/master/docs/mlgw-emulation.md
+Wants=redis-server.service mdtv2-broker.service
+After=network.target redis-server.service mdtv2-broker.service
+
+[Service]
+Type=simple
+# Always: mdt-web asks for a restart after [mlgw] changes (the daemon exits);
+# while [mlgw] is disabled it idles instead of exiting.
+Restart=always
+RestartSec=2s
+User=mdt
+Group=mdt
+# Telnet on port 23 needs this one capability -- nothing else, no root.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+# /var/lib/mdt-mlgw: devices.json (edited in mdt-web)
+StateDirectory=mdt-mlgw
+WorkingDirectory=/opt/mdt-tools/mlgw-emu
+ExecStart=/usr/bin/python3 -u /opt/mdt-tools/mlgw-emu/mlgw_emu.py --config /etc/ml-source-bridge.toml
+
+[Install]
+WantedBy=multi-user.target

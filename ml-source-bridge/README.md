@@ -198,6 +198,18 @@ install; that file documents every option. Key fields:
 
 Examples for each: [main README, Configuration](../README.md#configuration).
 
+## Checking a config
+
+```sh
+python3 ml_source_bridge.py --config /etc/ml-source-bridge.toml --check-config
+```
+
+Runs the same checks as startup (sources, providers, wake target, LIGHT
+keys) without touching the bus or any backend; prints the problems and exits
+1, or exits 0. The web UI runs it before every save. The bridge also exits
+cleanly when `ml-source-bridge` (or `all`) is published on redis
+`link:ctl:restart` -- systemd starts it again with the new config.
+
 ## Logs
 
 Goes to `/tmp/mdt.log` (shared with the broker) and via journald.

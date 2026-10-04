@@ -36,6 +36,7 @@ import os
 import re
 import secrets
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -580,7 +581,11 @@ def main() -> int:
     with open(args.config, "rb") as f:
         raw = tomllib.load(f)
     if not (raw.get("web") or {}).get("enabled", False):
-        log(f"[web] not enabled in {args.config} -- nothing to do")
+        # Idle instead of exiting: the unit has Restart=always. Enable
+        # [web] in the config, then: systemctl restart mdt-web
+        log(f"[web] not enabled in {args.config} -- idle")
+        signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+        signal.pause()
         return 0
     try:
         asyncio.run(serve(App(args.config, raw)))

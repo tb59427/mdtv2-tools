@@ -13,12 +13,19 @@ Philip's work it adds:
 - **Home Assistant integration**: the Pi reports what each source plays
   (including AirPlay straight from an iPhone, with cover art, and the
   recognized record), plus HA automations and one dashboard card for it all
+- **Web UI**: configure sources, providers, turntable, Home Assistant and
+  LIGHT keys in a browser -- validated by the bridge, comments in the config
+  kept
+- **MasterLink Gateway emulation**: the Pi can replace a B&O MLGW for Home
+  Assistant's mlgw integration -- devices, Beo4 commands, ML events
 
 The full list of changes is in [CHANGES.md](CHANGES.md).
 
 **Docs for the additions:**
 [providers](docs/providers.md) (AirPlay, Sendspin, MPD, ALSA) ·
 [Home Assistant](docs/home-assistant.md) ·
+[web UI](docs/web-ui.md) ·
+[MasterLink Gateway emulation](docs/mlgw-emulation.md) ·
 [testing a checkout on the Pi](docs/testing.md)
 
 `install.sh` sets up everything except Sendspin and MPD, which are installed
@@ -49,6 +56,8 @@ Receive and send any remote control messages or analog audio streams via MasterL
 | **Datalink protocol debugger** | Pretty-prints every DL'80 and DL'86 message, decoded (opcode names for DL'80; address/format/payload breakdown for DL'86 including status frames with volume/track/standby semantics). | `dl-debug/` |
 | **Bus state variables** | Daemon that keeps the current ML / DL'80 / DL'86 status (active source, transport, track, volume) in Redis keys `state:ml` / `state:dl80` / `state:dl86`, and publishes a change event on `link:<bus>:state`. Read with one `redis-cli GET`. | `state-tracker/` |
 | **ML device discovery** | The same daemon sweeps the MasterLink bus with `MASTER_PRESENT` pings and keeps a live inventory of which addresses/devices are present (AM / VM / SC / link nodes, with class) in `state:ml:devices`. Runs at startup and on demand (`PUBLISH link:ml:discover`). Non-disruptive — doesn't interrupt playback. | `state-tracker/` |
+| **Web UI** | Browser configuration of the bridge (sources, multi-provider, turntable incl. recognition, HA notifier, LIGHT keys) and the MLGW emulation. Saving lets the bridge validate the config first, keeps a backup and the file's comments, and restarts only what changed. Opt-in (`[web]`). | `web/` |
+| **MasterLink Gateway emulation** | The Pi answers Home Assistant's mlgw integration like a B&O MasterLink Gateway: device list, Beo4 commands onto the bus, `mlgw.ML_telegram` events from every telegram, and the MLGW's own events (LIGHT/CONTROL, all standby, source and picture/sound status) -- checked side by side against a real MLGW. Opt-in (`[mlgw]`). | `mlgw-emu/` |
 | **Home Assistant now-playing** | The bridge publishes per source which provider is playing and what (`state:nowplaying` / `link:ml:nowplaying` on Redis); `ha-notifier` forwards every change to an HA webhook, so HA shows AirPlay & co. too, not just Music Assistant. HA config (sensors, templates, button-card) included. | `ha-notifier/`, `home-assistant/` |
 | **One-line install** | `curl … bootstrap.sh \| sudo bash` on a fresh Pi OS Lite installs apt deps, patches `config.txt`, sets up systemd services, deploys all code, builds a hidden pymcuprog venv for flashing. | `bootstrap.sh`, `install.sh` |
 | **MCU updater** | `sudo flash.sh firmware-vX.Y.Z.hex` lets you update the microcontroller handling raw ML and DL communication | `mcu-firmware/flash.sh` |
@@ -235,8 +244,21 @@ timeout_s = 20
 "red"       = "/usr/local/bin/movie-mode.sh"
 ```
 
-The config file is `root:mdt 0640` -- it can hold the webhook URL and
-tokens in commands.
+### Web UI and MasterLink Gateway emulation
+
+```toml
+[web]
+enabled  = true
+username = "admin"
+password = "<choose one>"       # then: sudo systemctl restart mdt-web
+```
+
+Everything above can then be set at `http://<pi>/`; the MLGW emulation
+(`[mlgw]`) is switched on there too. Guides: [docs/web-ui.md](docs/web-ui.md),
+[docs/mlgw-emulation.md](docs/mlgw-emulation.md).
+
+The config file is `root:mdt 0660` -- it can hold the webhook URL and
+tokens in commands; group-writable so the web UI can save it.
 
 ## Repo layout vs. installed layout
 
@@ -251,6 +273,8 @@ tokens in commands.
 ├── dl-scripts/
 ├── state-tracker/         # state:ml / state:dl80 / state:dl86 daemon
 ├── ha-notifier/           # now-playing -> Home Assistant webhook
+├── mlgw-emu/              # MasterLink Gateway emulation
+├── web/                   # web UI (mdt-web)
 ├── mcu-firmware/
 └── .pymcuprog-venv/        # hidden venv for the UPDI flasher
 ```
