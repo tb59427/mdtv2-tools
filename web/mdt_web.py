@@ -113,14 +113,22 @@ def _hexint(value: int):
     return tomlkit.parse(f"x = 0x{value:02X}")["x"]
 
 
-def _set(table, key: str, value, hexfmt: bool = False) -> None:
+_NO_DEFAULT = object()
+
+
+def _set(table, key: str, value, hexfmt: bool = False, default=_NO_DEFAULT) -> None:
     """Write `value` only if it changed -- untouched values keep their
-    formatting and comments. None removes the key."""
+    formatting and comments. A key that isn't in the file is only added
+    when the value differs from `default` (what the services assume when
+    it's missing). None removes the key."""
     if value is None:
         if key in table:
             del table[key]
         return
-    if key in table and table[key] == value:
+    if key in table:
+        if table[key] == value:
+            return
+    elif default is not _NO_DEFAULT and value == default:
         return
     table[key] = _hexint(value) if hexfmt and isinstance(value, int) else value
 
@@ -175,12 +183,12 @@ def toml_to_model(cfg: dict) -> dict:
 
 def apply_model(doc, m: dict, cfg: dict) -> None:
     """Write the UI model into the tomlkit document in place."""
-    _set(doc, "role", m["role"])
-    _set(doc, "broadcast_clock", bool(m["broadcast_clock"]))
-    _set(doc, "auto_wake", bool(m["auto_wake"]))
+    _set(doc, "role", m["role"], default="sc")
+    _set(doc, "broadcast_clock", bool(m["broadcast_clock"]), default=True)
+    _set(doc, "auto_wake", bool(m["auto_wake"]), default=True)
     wt = str(m["wake_target"]).strip()
     _set(doc, "wake_target", int(wt, 16) if wt.lower().startswith("0x") else wt,
-         hexfmt=True)
+         hexfmt=True, default="vm")
 
     # [[sources]]: update entries in place (keeps their comments), append /
     # drop at the end.
@@ -213,15 +221,15 @@ def apply_model(doc, m: dict, cfg: dict) -> None:
                                      else [s["provider"]])}
     if "mpd" in uses or "mpd" in doc:
         t = _table(doc, "mpd")
-        _set(t, "host", m["mpd"]["host"])
-        _set(t, "port", int(m["mpd"]["port"]))
-        _set(t, "password", m["mpd"]["password"])
+        _set(t, "host", m["mpd"]["host"], default="localhost")
+        _set(t, "port", int(m["mpd"]["port"]), default=6600)
+        _set(t, "password", m["mpd"]["password"], default="")
     if "turntable" in uses or "turntable" in doc:
         t = _table(doc, "turntable")
-        for k in ("loopback", "recognize", "standby_ml_on_stop"):
-            _set(t, k, bool(m["turntable"][k]))
-        _set(t, "metadata_title", m["turntable"]["metadata_title"])
-        _set(t, "pga_db", float(m["turntable"]["pga_db"]))
+        for k, d in (("loopback", True), ("recognize", False), ("standby_ml_on_stop", True)):
+            _set(t, k, bool(m["turntable"][k]), default=d)
+        _set(t, "metadata_title", m["turntable"]["metadata_title"], default="PHONO")
+        _set(t, "pga_db", float(m["turntable"]["pga_db"]), default=0.0)
 
     hn = m["ha_notifier"]
     if hn["enabled"] or "ha_notifier" in doc:
@@ -229,13 +237,13 @@ def apply_model(doc, m: dict, cfg: dict) -> None:
         _set(t, "enabled", bool(hn["enabled"]))
         _set(t, "url", hn["url"])
         _set(t, "sources", list(hn["sources"]) or None)
-        _set(t, "cover_port", int(hn["cover_port"]))
+        _set(t, "cover_port", int(hn["cover_port"]), default=8099)
 
     lh = m["light_handler"]
     if lh["enabled"] or lh["commands"] or "light_handler" in doc:
         t = _table(doc, "light_handler")
         _set(t, "enabled", bool(lh["enabled"]))
-        _set(t, "timeout_s", int(lh["timeout_s"]))
+        _set(t, "timeout_s", int(lh["timeout_s"]), default=20)
         cmds = _table(t, "commands")
         for k in [k for k in cmds if k not in lh["commands"]]:
             del cmds[k]
@@ -246,8 +254,8 @@ def apply_model(doc, m: dict, cfg: dict) -> None:
     if mg["enabled"] or "mlgw" in doc:
         t = _table(doc, "mlgw")
         _set(t, "enabled", bool(mg["enabled"]))
-        _set(t, "listen_only", bool(mg["listen_only"]))
-        _set(t, "username", mg.get("username") or "admin")
+        _set(t, "listen_only", bool(mg["listen_only"]), default=True)
+        _set(t, "username", mg.get("username") or "admin", default="admin")
         if mg.get("password"):                       # write-only in the UI
             _set(t, "password", mg["password"])
 
