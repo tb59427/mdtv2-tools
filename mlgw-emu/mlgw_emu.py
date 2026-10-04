@@ -130,14 +130,13 @@ def load_config(path: str) -> Optional[Config]:
 def beo4_telegram(to: int, cmd: int, dest: int, sec_source: int = 0,
                   link: int = 0) -> bytes:
     """A Beo4 key from the MLGW to a device, as a real MLGW puts it on the
-    bus (captured: c0 f0 01 0a 00 00 00 20 05 02 00 01 00 00 58 3b 00 for
-    Light Timeout to the video master)."""
-    t = bytearray([to, ADDR_MLGW, 0x01, 0x0A, 0x00, 0x00, 0x00,
-                   PT_VIRTUAL_BEO4, 0x05, 0x02, 0x00, dest & 0xFF,
-                   sec_source & 0xFF, link & 0xFF, cmd & 0xFF])
-    t.append(sum(t) & 0xFF)
-    t.append(0x00)
-    return bytes(t)
+    bus (captured: c0 f0 01 0a 00 00 00 20 05 02 00 01 00 00 58 [3b 00] for
+    Light Timeout to the video master). Without checksum and end marker:
+    that's what the broker takes on link:ml:transmit (it adds both) and
+    what the MLGW's _MLLOG shows."""
+    return bytes([to, ADDR_MLGW, 0x01, 0x0A, 0x00, 0x00, 0x00,
+                  PT_VIRTUAL_BEO4, 0x05, 0x02, 0x00, dest & 0xFF,
+                  sec_source & 0xFF, link & 0xFF, cmd & 0xFF])
 
 
 def mllog_line(telegram: bytes) -> str:
@@ -177,9 +176,14 @@ def redis_reader(cfg: Config, feed: TelegramFeed, stop: threading.Event) -> None
                 m = ps.get_message(timeout=1.0)
                 if m and isinstance(m.get("data"), str):
                     try:
-                        feed.publish(bytes.fromhex(m["data"].strip()))
+                        t = bytes.fromhex(m["data"].strip())
                     except ValueError:
-                        pass
+                        continue
+                    # rx carries checksum + 0x00 end marker, tx doesn't;
+                    # the MLGW's _MLLOG shows neither.
+                    if m["channel"] == CHAN_ML_RX and len(t) > 2:
+                        t = t[:-2]
+                    feed.publish(t)
         except Exception as e:                            # redis down etc.
             log(f"redis: {e} -- retrying in 2 s")
             stop.wait(2.0)
