@@ -19,6 +19,15 @@ Philip's work it adds:
 - **MasterLink Gateway emulation**: the Pi can replace a B&O MLGW for Home
   Assistant's mlgw integration -- devices, Beo4 commands, ML events
 
+> [!WARNING]
+> **Alpha:** the **MasterLink Gateway emulation**, the **web UI** and the
+> extended **`install.sh`** are largely alpha. They run on the author's own
+> system and were tested against a real MLGW, but not much beyond that.
+> Anyone who wants to try them is very welcome -- but if something breaks,
+> you may well be on your own. Keep a way back (see
+> [testing a checkout on the Pi](docs/testing.md)) and a copy of your
+> `/etc/ml-source-bridge.toml`.
+
 The full list of changes is in [CHANGES.md](CHANGES.md).
 
 **Docs for the additions:**
