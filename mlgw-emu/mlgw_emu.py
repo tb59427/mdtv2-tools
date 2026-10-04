@@ -6,9 +6,8 @@ MLGW over three network interfaces. This daemon provides them on the Pi,
 backed by the MDT HAT's view of the ML bus (redis link:ml:*), so the
 unmodified integration can use the Pi instead of the B&O box:
 
-  HTTP  :80    GET /mlgwpservices.json (Digest or Basic auth) -- rooms,
-               devices (MLN) and their sources, in the MLGW's own format;
-               plus a web UI at / to edit them (like the MLGW's own pages).
+  HTTP  :80    GET /mlgwpservices.json -- rooms, devices (MLN), sources;
+               served by mdt-web (web/), which also has the UI to edit them.
   TCP   :9000  the documented MLGW protocol: login, ping, serial number,
                Beo4 commands to a device (by MLN); events derived from the
                bus (source status, picture & sound status, LIGHT/CONTROL,
@@ -17,7 +16,11 @@ unmodified integration can use the Pi instead of the B&O box:
                telegram -- what HA turns into mlgw.ML_telegram events.
 
 Devices: store.py (the MLGW's JSON format plus each device's ML bus
-address, which a real MLGW keeps internally), edited in the web UI.
+address, which a real MLGW keeps internally), edited in mdt-web. After a
+save, mdt-web publishes "mlgw-emu" on redis link:ctl:restart: the devices
+are reloaded in place and HA gets the MLGW "configuration changed"
+message, so it reloads the integration. Status for the UI (HA connections,
+listen-only) goes to redis key state:mlgw.
 
 listen_only = true (the default): commands from HA are logged and echoed
 into the ML log as if sent, but never put on the bus -- lets the emulation
@@ -30,12 +33,8 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import base64
-import hashlib
 import json
 import os
-import re
-import secrets
 import sys
 import threading
 import time
@@ -47,12 +46,13 @@ from typing import Optional
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from events import EventSynth                         # noqa: E402
-from store import ConfigError, DeviceStore           # noqa: E402
+from store import DeviceStore                        # noqa: E402
 
 DEFAULT_CONFIG = "/etc/ml-source-bridge.toml"
 CHAN_ML_RX = "link:ml:receive"
 CHAN_ML_TX = "link:ml:transmit"
-STATE_DEVICES_KEY = "state:ml:devices"               # state-tracker's inventory
+CTL_RESTART = "link:ctl:restart"                     # mdt-web: "mlgw-emu" = reload devices
+STATE_KEY = "state:mlgw"                             # status for mdt-web
 
 ADDR_MLGW = 0xF0
 PT_VIRTUAL_BEO4 = 0x20
@@ -83,7 +83,6 @@ class Config:
     password: str
     devices_file: str
     listen_only: bool = True
-    http_port: int = 80
     telnet_port: int = 23
     api_port: int = 9000
     redis_host: str = "localhost"
@@ -107,7 +106,6 @@ def load_config(path: str) -> Optional[Config]:
         username=str(sec.get("username", "admin")), password=password,
         devices_file=str(sec.get("devices_file", "/var/lib/mdt-mlgw/devices.json")),
         listen_only=bool(sec.get("listen_only", True)),
-        http_port=int(sec.get("http_port", 80)),
         telnet_port=int(sec.get("telnet_port", 23)),
         api_port=int(sec.get("api_port", 9000)),
         redis_host=str(cfg.get("redis_host", "localhost")),
@@ -274,6 +272,30 @@ class Gateway:
                                 extended=cfg.extended_status)
         self.pacer: Optional[Pacer] = None
 
+    def publish_status(self) -> None:
+        """state:mlgw for mdt-web's status display."""
+        try:
+            import redis
+            redis.StrictRedis(host=self.cfg.redis_host, port=self.cfg.redis_port).set(
+                STATE_KEY, json.dumps({
+                    "sessions": sum(1 for s in self.sessions if s.authed),
+                    "listen_only": self.cfg.listen_only,
+                    "devices": sum(1 for _ in self.store.products()),
+                    "time": time.time()}))
+        except Exception as e:
+            log(f"status to redis failed: {e}")
+
+    def reload(self) -> None:
+        """Devices changed in mdt-web: reload, tell HA to reload too."""
+        try:
+            self.store.load()
+        except Exception as e:
+            log(f"reloading {self.cfg.devices_file} failed: {e} -- keeping the old devices")
+            return
+        log("devices reloaded -- telling HA to reload the integration")
+        self.broadcast(frame(MT_CONFIG_CHANGED))
+        self.publish_status()
+
     def broadcast(self, msg: bytes) -> None:
         """An MLGW event to every logged-in HA connection."""
         for s in list(self.sessions):
@@ -295,6 +317,7 @@ class Gateway:
                 s.authed = True
                 log("HA logged in")
                 s.send(frame(MT_LOGIN_STATUS, b"\x00"))
+                self.publish_status()
             else:
                 s.failures += 1
                 log(f"login failed for user {user!r}")
@@ -358,6 +381,7 @@ async def handle_api(gw: Gateway, reader: asyncio.StreamReader,
         pass
     finally:
         gw.sessions.discard(s)
+        gw.publish_status()
         sender.cancel()
         writer.close()
         log(f"MLGW protocol connection from {peer} closed")
@@ -451,193 +475,47 @@ async def handle_telnet(cfg: Config, feed: TelegramFeed,
         log(f"telnet connection from {peer} closed")
 
 
-# ---- HTTP: /mlgwpservices.json, web UI, UI API ---------------------------------
-
-class DigestAuth:
-    realm = "MLGW"
-
-    def __init__(self, user: str, password: str) -> None:
-        self.user, self.password = user, password
-        self.nonces: dict[str, float] = {}
-
-    def challenge(self) -> str:
-        nonce = secrets.token_hex(16)
-        self.nonces[nonce] = time.monotonic()
-        for n, t in list(self.nonces.items()):            # keep it small
-            if time.monotonic() - t > 3600:
-                del self.nonces[n]
-        return (f'Digest realm="{self.realm}", qop="auth", nonce="{nonce}", '
-                f'opaque="{secrets.token_hex(8)}", algorithm=MD5')
-
-    def check(self, method: str, header: str) -> bool:
-        if header.startswith("Basic "):
-            try:
-                user, _, pw = base64.b64decode(header[6:]).decode().partition(":")
-            except Exception:
-                return False
-            return user == self.user and pw == self.password
-        if not header.startswith("Digest "):
-            return False
-        p = {m[0]: m[2] if m[2] else m[1]
-             for m in re.findall(r'(\w+)=("([^"]*)"|[^,\s]*)', header[7:])}
-        if p.get("username") != self.user or p.get("nonce") not in self.nonces:
-            return False
-        md5 = lambda s: hashlib.md5(s.encode()).hexdigest()
-        ha1 = md5(f"{self.user}:{self.realm}:{self.password}")
-        ha2 = md5(f"{method}:{p.get('uri', '')}")
-        if p.get("qop"):
-            want = md5(f"{ha1}:{p['nonce']}:{p.get('nc', '')}:{p.get('cnonce', '')}:{p['qop']}:{ha2}")
-        else:
-            want = md5(f"{ha1}:{p['nonce']}:{ha2}")
-        return secrets.compare_digest(want, p.get("response", ""))
-
-
-def ui_tables() -> dict:
-    """Beo4 keys and ML source names for the UI's dropdowns, from
-    ml-debug's tables (a sibling directory, both in the repo and in
-    /opt/mdt-tools)."""
-    sys.path.insert(0, os.path.join(os.path.dirname(HERE), "ml-debug"))
-    try:
-        import const as mlconst                       # ml-debug/const.py
-        keys = dict(getattr(mlconst, "beo4_commanddict", {}))
-        sources = dict(getattr(mlconst, "ml_selectedsourcedict", {}))
-    except Exception as e:
-        log(f"ml-debug tables unavailable ({e}) -- UI shows raw codes")
-        keys, sources = {}, {}
-    return {"keys": {f"{k}": v for k, v in sorted(keys.items())},
-            "sources": {f"{k}": v for k, v in sorted(sources.items())}}
-
-
-class Http:
-    def __init__(self, gw: Gateway) -> None:
-        self.gw = gw
-        self.auth = DigestAuth(gw.cfg.username, gw.cfg.password)
-        self.tables = ui_tables()
-        with open(os.path.join(HERE, "ui", "index.html"), "rb") as f:
-            self.index = f.read()
-
-    async def handle(self, reader: asyncio.StreamReader,
-                     writer: asyncio.StreamWriter) -> None:
-        try:
-            head = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), 10)
-            lines = head.decode("latin-1").split("\r\n")
-            method, target = (lines[0].split() + ["", ""])[:2]
-            headers = {}
-            for line in lines[1:]:
-                k, _, v = line.partition(":")
-                headers[k.strip().lower()] = v.strip()
-            body = b""
-            n = int(headers.get("content-length", "0") or 0)
-            if n:
-                if n > 2_000_000:
-                    raise ValueError("body too large")
-                body = await asyncio.wait_for(reader.readexactly(n), 10)
-        except (asyncio.TimeoutError, asyncio.IncompleteReadError,
-                asyncio.LimitOverrunError, ConnectionError, ValueError):
-            writer.close()
-            return
-
-        def respond(code: str, payload: bytes, ctype: str = "text/plain; charset=utf-8",
-                    extra: str = "") -> None:
-            writer.write((f"HTTP/1.1 {code}\r\nContent-Type: {ctype}\r\n"
-                          f"Content-Length: {len(payload)}\r\nCache-Control: no-store\r\n"
-                          f"{extra}Connection: close\r\n\r\n").encode() + payload)
-
-        def respond_json(obj, code: str = "200 OK") -> None:
-            respond(code, json.dumps(obj, ensure_ascii=False).encode(),
-                    "application/json; charset=utf-8")
-
-        path = target.split("?")[0]
-        try:
-            if not self.auth.check(method, headers.get("authorization", "")):
-                respond("401 Unauthorized", b"unauthorized\n",
-                        extra=f"WWW-Authenticate: {self.auth.challenge()}\r\n")
-            elif path == "/mlgwpservices.json":
-                log(f"config requested by {writer.get_extra_info('peername')[0]}")
-                respond_json(self.gw.store.served(self.gw.cfg.api_port, self.gw.serial()))
-            elif path in ("/", "/index.html") and method == "GET":
-                respond("200 OK", self.index, "text/html; charset=utf-8")
-            elif path.startswith("/api/"):
-                self.api(method, path, body, respond_json)
-            else:
-                respond("404 Not Found", b"not found\n")
-        except Exception as e:
-            log(f"http {method} {path}: {e}")
-            respond_json({"error": str(e)}, "500 Internal Server Error")
-        try:
-            await writer.drain()
-        finally:
-            writer.close()
-
-    def api(self, method: str, path: str, body: bytes, respond_json) -> None:
-        gw = self.gw
-        if path == "/api/config" and method == "GET":
-            respond_json(gw.store.data)
-        elif path == "/api/config" and method == "PUT":
-            try:
-                gw.store.save(json.loads(body))
-            except (ConfigError, ValueError) as e:
-                respond_json({"error": str(e)}, "400 Bad Request")
-                return
-            log("device configuration saved -- telling HA to reload")
-            gw.broadcast(frame(MT_CONFIG_CHANGED))
-            respond_json({"ok": True})
-        elif path == "/api/import" and method == "POST":
-            try:
-                merged = gw.store.import_mlgw(json.loads(body))
-            except ValueError as e:
-                respond_json({"error": f"not an MLGW export: {e}"}, "400 Bad Request")
-                return
-            respond_json(merged)                    # the UI shows it; saved on Save
-        elif path == "/api/meta" and method == "GET":
-            respond_json({**self.tables, "serial": gw.serial(),
-                          "listen_only": gw.cfg.listen_only,
-                          "sessions": sum(1 for s in gw.sessions if s.authed)})
-        elif path == "/api/bus-devices" and method == "GET":
-            respond_json(self.bus_devices())
-        elif path == "/api/last-key" and method == "GET":
-            respond_json(gw.synth.last_key or {})
-        else:
-            respond_json({"error": "unknown API call"}, "404 Not Found")
-
-    def bus_devices(self) -> list:
-        """ML addresses the state-tracker has seen on the bus."""
-        import redis
-        try:
-            raw = redis.StrictRedis(host=self.gw.cfg.redis_host,
-                                    port=self.gw.cfg.redis_port,
-                                    decode_responses=True).get(STATE_DEVICES_KEY)
-        except Exception:
-            return []
-        if not raw:
-            return []
-        try:
-            data = json.loads(raw)
-        except ValueError:
-            return []
-        devs = data.get("devices", data) if isinstance(data, dict) else data
-        out = []
-        if isinstance(devs, dict):
-            for addr, d in devs.items():
-                try:
-                    a = int(str(addr), 16) if str(addr).lower().startswith("0x") else int(addr)
-                except ValueError:
-                    continue
-                info = d if isinstance(d, dict) else {}
-                out.append({"address": a, "class": info.get("class"),
-                            "name": info.get("name") or info.get("role"),
-                            "present": info.get("present", True)})
-        elif isinstance(devs, list):
-            for d in devs:
-                if isinstance(d, dict) and "address" in d:
-                    a = d["address"]
-                    a = int(a, 16) if isinstance(a, str) else int(a)
-                    out.append({"address": a, "class": d.get("class"),
-                                "name": d.get("name") or d.get("role")})
-        return sorted(out, key=lambda d: d["address"])
-
-
 # ---- main -------------------------------------------------------------------------
+
+def wait_for_restart(host: str, port: int) -> None:
+    import redis
+    while True:
+        try:
+            ps = redis.StrictRedis(host=host, port=port, decode_responses=True
+                                   ).pubsub(ignore_subscribe_messages=True)
+            ps.subscribe(CTL_RESTART)
+            while True:
+                m = ps.get_message(timeout=5.0)
+                if m and m.get("data") in ("mlgw-emu", "mlgw-emu:restart", "all"):
+                    log("restart requested (config changed)")
+                    return
+        except Exception:
+            time.sleep(2.0)
+
+
+def ctl_listener(cfg: Config, loop: asyncio.AbstractEventLoop, gw: "Gateway",
+                 stop: threading.Event) -> None:
+    """Thread: mdt-web saved the devices -> reload them on the loop."""
+    import redis
+    while not stop.is_set():
+        try:
+            ps = redis.StrictRedis(host=cfg.redis_host, port=cfg.redis_port,
+                                   decode_responses=True).pubsub(
+                ignore_subscribe_messages=True)
+            ps.subscribe(CTL_RESTART)
+            while not stop.is_set():
+                m = ps.get_message(timeout=1.0)
+                data = m.get("data") if m else None
+                if data == "mlgw-emu":
+                    loop.call_soon_threadsafe(gw.reload)
+                elif data in ("mlgw-emu:restart", "all"):
+                    # [mlgw] settings changed (listen_only, password, ...):
+                    # exit, systemd (Restart=always) starts us with them.
+                    log("restart requested (config changed) -- exiting")
+                    os._exit(0)
+        except Exception:
+            stop.wait(2.0)
+
 
 async def serve(cfg: Config) -> None:
     store = open_store(cfg)
@@ -647,18 +525,19 @@ async def serve(cfg: Config) -> None:
     stop = threading.Event()
     threading.Thread(target=redis_reader, args=(cfg, feed, stop),
                      name="redis", daemon=True).start()
+    threading.Thread(target=ctl_listener, args=(cfg, loop, gw, stop),
+                     name="ctl", daemon=True).start()
     gw.pacer = Pacer(cfg, feed)
     pacer_task = asyncio.create_task(gw.pacer.run())
-    http = Http(gw)
+    gw.publish_status()
     servers = [
-        await asyncio.start_server(http.handle, port=cfg.http_port),
         await asyncio.start_server(lambda r, w: handle_api(gw, r, w), port=cfg.api_port),
         await asyncio.start_server(
             lambda r, w: handle_telnet(cfg, feed, r, w), port=cfg.telnet_port),
     ]
     n = sum(1 for _ in store.products())
-    log(f"serving {n} devices: web UI + config http :{cfg.http_port}, "
-        f"MLGW protocol :{cfg.api_port}, telnet :{cfg.telnet_port}"
+    log(f"serving {n} devices: MLGW protocol :{cfg.api_port}, "
+        f"telnet :{cfg.telnet_port} (config + UI: mdt-web)"
         + (" -- LISTEN-ONLY (commands are not sent to the bus)"
            if cfg.listen_only else ""))
     for _z, p in store.products():
@@ -677,7 +556,13 @@ def main() -> int:
     args = ap.parse_args()
     cfg = load_config(args.config)
     if cfg is None:
-        log(f"[mlgw] not enabled in {args.config} -- nothing to do")
+        # Idle until mdt-web switches the emulation on (exiting here would
+        # make systemd's Restart=always loop).
+        log(f"[mlgw] not enabled in {args.config} -- idle until the config changes")
+        with open(args.config, "rb") as f:
+            raw = tomllib.load(f)
+        wait_for_restart(str(raw.get("redis_host", "localhost")),
+                         int(raw.get("redis_port", 6379)))
         return 0
     try:
         asyncio.run(serve(cfg))
