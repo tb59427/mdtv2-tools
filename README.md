@@ -20,13 +20,14 @@ Philip's work it adds:
   Assistant's mlgw integration -- devices, Beo4 commands, ML events
 
 > [!WARNING]
-> **Alpha:** the **MasterLink Gateway emulation**, the **web UI** and the
-> extended **`install.sh`** are largely alpha. They run on the author's own
-> system and were tested against a real MLGW, but not much beyond that.
-> Anyone who wants to try them is very welcome -- but if something breaks,
-> you may well be on your own. Keep a way back (see
-> [testing a checkout on the Pi](docs/testing.md)) and a copy of your
-> `/etc/ml-source-bridge.toml`.
+> **Beta:** the **MasterLink Gateway emulation**, the **web UI** and the
+> extended **`install.sh`** are in beta. They run in daily use on the
+> author's system -- where the Pi has replaced a real MLGW for Home
+> Assistant after side-by-side tests against it, and `install.sh` updated
+> the installation -- but that is one system. Anyone who wants to try them
+> is very welcome -- but if something breaks, you may well be on your own.
+> Keep a way back (see [testing a checkout on the Pi](docs/testing.md)) and
+> a copy of your `/etc/ml-source-bridge.toml`.
 
 The full list of changes is in [CHANGES.md](CHANGES.md).
 
