@@ -163,15 +163,16 @@ class TelegramFeed:
         self.synth = synth
         self.queues: set[asyncio.Queue] = set()
 
-    def publish(self, telegram: bytes) -> None:          # any thread
-        self.loop.call_soon_threadsafe(self._fan_out, telegram)
+    def publish(self, telegram: bytes, own: bool = False) -> None:   # any thread
+        """`own`: sent by the Pi itself, not received from the bus."""
+        self.loop.call_soon_threadsafe(self._fan_out, telegram, own)
 
-    def _fan_out(self, telegram: bytes) -> None:
+    def _fan_out(self, telegram: bytes, own: bool) -> None:
         for q in list(self.queues):
             if q.qsize() < 1000:                          # slow client: drop
                 q.put_nowait(telegram)
         if self.synth is not None:
-            self.synth.feed(telegram, time.time())
+            self.synth.feed(telegram, time.time(), own)
 
 
 def redis_reader(cfg: Config, feed: TelegramFeed, stop: threading.Event) -> None:
@@ -194,9 +195,10 @@ def redis_reader(cfg: Config, feed: TelegramFeed, stop: threading.Event) -> None
                         continue
                     # rx carries checksum + 0x00 end marker, tx doesn't;
                     # the MLGW's _MLLOG shows neither.
-                    if m["channel"] == CHAN_ML_RX and len(t) > 2:
+                    own = m["channel"] == CHAN_ML_TX
+                    if not own and len(t) > 2:
                         t = t[:-2]
-                    feed.publish(t)
+                    feed.publish(t, own)
         except Exception as e:                            # redis down etc.
             log(f"redis: {e} -- retrying in 2 s")
             stop.wait(2.0)
@@ -234,7 +236,7 @@ class Pacer:
             t = await self.queue.get()
             try:
                 if self.cfg.listen_only:
-                    self.feed.publish(t)
+                    self.feed.publish(t, own=True)
                 else:
                     self._send_to_bus(t)
             except Exception as e:
