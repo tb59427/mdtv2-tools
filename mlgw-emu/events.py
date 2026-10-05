@@ -10,7 +10,12 @@ BeoSound 3200 as audio master, link rooms):
                       Key Release -- one event each. Room = the room of the
                       sending device (a link-room product only forwards if
                       it supports LIGHT; a BeoVision 6 and BeoLab 2000 don't).
-  0x05 All standby    RELEASE (or STANDBY) from a master to ALL (0x80).
+  0x05 All standby    RELEASE (or STANDBY) to ALL (0x80) from any B&O device
+                      -- from the master when pressed in its room, from the
+                      link device when pressed in a link room (seen: a
+                      BeoLab 2000 sending 80 03 .. 11). Not when the Pi sent
+                      it: the bridge broadcasts RELEASE whenever a stream
+                      stops, which must not switch every player off.
   0x02 Source status  SOURCE STATUS (0x87) a master sends to 0xF0 -> status
                       of that master's MLN. That's all a real MLGW reports:
                       link rooms don't address the MLGW, and HA's integration
@@ -88,14 +93,15 @@ class EventSynth:
 
     # ---- feed --------------------------------------------------------------
 
-    def feed(self, t: bytes, now: float = 0.0) -> None:
+    def feed(self, t: bytes, now: float = 0.0, own: bool = False) -> None:
+        """`own`: the Pi sent this telegram itself (bridge, emulation)."""
         if len(t) < 9:
             return
         to, frm, pt = t[0], t[1], t[7]
         try:
             if pt == PT_VIRTUAL_BEO4 and to == ADDR_MLGW and len(t) >= 15:
                 self._light(frm, t[14])
-            elif pt in (PT_RELEASE, PT_STANDBY) and to == ADDR_ALL and frm in MASTERS:
+            elif pt in (PT_RELEASE, PT_STANDBY) and to == ADDR_ALL and not own:
                 self.log("all standby")
                 self.on_source.clear()
                 self.emit(mlgw_frame(0x05, b""))
