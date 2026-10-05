@@ -23,7 +23,10 @@ by side against one):
   LIGHT itself and Key Release; room = the forwarding device's room. Only
   masters that support LIGHT forward (a BeoVision 10 does; a BeoVision 6 or
   BeoLab 2000 doesn't).
-- **All standby** — RELEASE / STANDBY from a master to all devices.
+- **All standby** — RELEASE / STANDBY to all devices from any B&O device:
+  the master when pressed in its room, the link device when pressed in a
+  link room. Not the Pi's own broadcasts (the bridge sends RELEASE to all
+  whenever a stream stops).
 - **Source status, picture & sound status** — what masters send to the MLGW
   address (e.g. the video master's source, volume, speaker mode). Like a real
   MLGW, link rooms aren't reported; the integration tracks them from the ML
@@ -70,20 +73,40 @@ commands off the bus; to test them, unplug the real MLGW from the bus first
 
 ## Switch your Home Assistant over
 
+Done this way on the author's system; the switch can be made in two steps,
+with the real MLGW still on the bus for the first.
+
 1. Keep the real MLGW's **serial** (the import does; `serial` in `[mlgw]`
    overrides it) — HA's entity ids are built from serial + MLN, so entities
    and automations carry over.
-2. Unplug the real MLGW (bus and network).
-3. UI: untick *Listen only*, Save.
-4. HA: delete the mlgw integration, add it again with the **Pi's IP** and the
-   emulation's login, "Use undocumented MasterLink bus feature" ticked. HA
-   restores entity names and settings when the same unique ids come back.
-5. Check: media players show their state, a Beo4 key fires
-   `mlgw.ML_telegram`, LIGHT in a room that forwards it fires
-   `light_control_event`.
+2. Back up Home Assistant.
+3. **Disconnect the real MLGW from the network** (it may stay on the bus for
+   now). Otherwise HA re-discovers it via zeroconf once its integration is
+   deleted; with the same serial as the emulation, that pending discovery
+   makes adding the emulation fail with *"already in progress"*. If that
+   happens anyway: disconnect it, restart HA.
+   **Don't click "Ignore"** on the discovered MLGW — HA would then ignore
+   that serial and reject the emulation as *"already configured"* (undo:
+   Devices & services → ⋮ → show ignored integrations).
+4. HA: delete the mlgw integration, add it again with the **Pi's IP**, the
+   emulation's login — the **`[mlgw]` password**, not the web UI's — and
+   "Use undocumented MasterLink bus feature" ticked. HA restores entity
+   names and settings when the same unique ids come back.
+5. Check, still in *Listen only*: media players show their state, Beo4 keys
+   fire `mlgw.ML_telegram` (and the automations using them run), LIGHT in a
+   room that forwards it fires `light_control_event`, all standby switches
+   every player off.
+6. Unplug the real MLGW from the bus, untick *Listen only*, Save — then
+   **reload the mlgw integration in HA** (see below) — and check that HA can
+   switch a room on, change the volume and switch it off.
 
 Back: plug the MLGW in, tick *Listen only* again, point the integration at
 the MLGW again.
+
+**After mlgw-emu restarts** — an update, or saving changed `[mlgw]` settings
+in the UI — HA's integration doesn't reliably reconnect its telnet session:
+reload the integration. Saving only the devices doesn't restart mlgw-emu;
+HA reloads the integration by itself then.
 
 ## Known issues of the integration
 
