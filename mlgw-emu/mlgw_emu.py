@@ -305,7 +305,7 @@ class Gateway:
                 s.send(msg)
 
     def serial(self) -> str:
-        return self.cfg.serial or str(self.store.data.get("sn", ""))
+        return self.cfg.serial or self.store.identity()[0]
 
     def handle(self, s: ApiSession, msg_type: int, payload: bytes) -> None:
         if msg_type == MT_PING:

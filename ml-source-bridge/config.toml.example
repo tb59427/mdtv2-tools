@@ -384,6 +384,8 @@ display_name = "N.RADIO"        # optional; up to 11 chars ASCII
 # password    = "<choose one>"
 # devices_file = "/var/lib/mdt-mlgw/devices.json"
 # serial      = ""              # default: the "sn" from the device config --
-#                               # keep the real MLGW's to keep HA's entities
+#                               # keep the real MLGW's to keep HA's entities.
+#                               # Without one (no MLGW before), a stable
+#                               # 8-digit serial is derived from this Pi.
 # extended_status = false       # true: source status for link rooms too
 #                               # (a real MLGW only reports masters)

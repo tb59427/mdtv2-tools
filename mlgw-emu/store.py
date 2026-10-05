@@ -16,14 +16,35 @@ which a real MLGW keeps internally. It is stripped from what HA gets.
 
 The file is written only when the configuration is saved in the web UI,
 atomically (temp file + rename in the same directory).
+
+Serial number and project name: HA's integration needs both (the config
+flow reads them, entity ids are built from the serial). An import from a
+real MLGW brings its own; without one, a stable 8-digit serial is derived
+from the Pi's /etc/machine-id (same value in every process, survives
+updates) and stored with the next save, so it also survives a new SD card.
 """
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import os
 import tempfile
 from typing import Optional
+
+DEFAULT_PROJECT = "mdtv2"
+
+
+def default_serial() -> str:
+    """A stable 8-digit serial (like a real MLGW's) for this machine."""
+    try:
+        with open("/etc/machine-id") as f:
+            seed = f.read().strip()
+    except OSError:
+        import socket
+        seed = socket.gethostname()
+    n = int(hashlib.sha256(f"mdtv2-mlgw:{seed}".encode()).hexdigest(), 16)
+    return str(10_000_000 + n % 90_000_000)
 
 
 class ConfigError(ValueError):
@@ -107,7 +128,17 @@ class DeviceStore:
         validate(data)
         self.data = data
 
+    def identity(self) -> tuple[str, str]:
+        """(serial, project) -- the configured ones, or the defaults."""
+        return (str(self.data.get("sn") or default_serial()),
+                str(self.data.get("project") or DEFAULT_PROJECT))
+
     def save(self, new: dict) -> None:
+        # Pin serial / project on the first save, so they don't change if
+        # the machine-id does (new SD card, new Pi).
+        new.setdefault("sn", self.data.get("sn") or default_serial())
+        new.setdefault("project", self.data.get("project") or DEFAULT_PROJECT)
+        new.setdefault("version", 2)
         for _z, p in self._products(new):
             for s in p.get("sources", []):
                 normalize_source(s)
@@ -165,7 +196,8 @@ class DeviceStore:
         out = copy.deepcopy(self.data)
         for _z, p in self._products(out):
             p.pop("mlAddress", None)
+        sn, project = self.identity()
         out["port"] = port
-        if serial:
-            out["sn"] = serial
+        out["sn"] = serial or sn
+        out["project"] = project
         return out

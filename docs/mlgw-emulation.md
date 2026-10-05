@@ -46,6 +46,12 @@ MLGW (e.g. the BeoLink app).
    (download it from the MLGW:
    `curl --digest -u <user> http://<mlgw>/mlgwpservices.json -o mlgwpservices.json`),
    or add rooms and devices by hand.
+   **Never had an MLGW?** Then there's no serial number to take over — the
+   emulation derives a stable 8-digit one from the Pi (`/etc/machine-id`)
+   and keeps it with the first save of the devices; the project name
+   defaults to "mdtv2". HA needs both: it reads them when adding the
+   integration and builds its entity ids from the serial, so don't change
+   the serial afterwards (`serial` in `[mlgw]` sets your own).
 4. Give every device its **ML address** — pick it from the devices seen on
    the bus, or press *Identify* and any Beo4 key in that room. To read the
    addresses a real MLGW uses: while it is on the bus, run
