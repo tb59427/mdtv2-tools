@@ -399,7 +399,8 @@ function renderMlgw(page) {
       el("div", {class: "hint"}, "Rooms, devices and sources as HA's integration sees them. Each device needs its ML address — pick it from the devices seen on the bus, or press Identify and any Beo4 key in that room. Saving the devices makes HA reload the integration."),
       el("div", {class: "row"},
         el("label", {class: "f"}, "Project", el("input", {value: mlgw.project || "", oninput: (e) => { mlgw.project = e.target.value; changed(); }})),
-        el("span", {class: "chip"}, mlgw.sn ? "SN " + mlgw.sn : "no serial"),
+        el("span", {class: "chip", title: mlgw.sn ? "" : "generated for this Pi; saved with the devices"},
+          "SN " + (mlgw.sn || meta.serial || "?")),
         el("span", {class: "spacer"}),
         el("button", {class: "small", onclick: () => { const n = Math.max(0, ...mlgw.zones.map((z) => z.number || 0)) + 1;
           mlgw.zones.push({number: n, name: "", products: [], scenes: [], cameras: []}); changed(); render(); }}, "Add room"),

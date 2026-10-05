@@ -466,7 +466,7 @@ class App:
                 st = self.mlgw_store()
             except Exception:
                 pass
-            return 200, {**self.tables, "serial": (st.data.get("sn", "") if st else ""),
+            return 200, {**self.tables, "serial": (st.identity()[0] if st else ""),
                          "mlgw_enabled": bool((raw.get("mlgw") or {}).get("enabled"))}
         if path == "/api/status":
             return 200, self.status()
