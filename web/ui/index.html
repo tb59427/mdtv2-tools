@@ -451,7 +451,11 @@ function render() {
   else if (t === "mlgw") renderMlgw(page);
   updateBar();
 }
-window.addEventListener("hashchange", () => { banner(); render(); });
+window.addEventListener("hashchange", async () => {
+  banner(); render();
+  // The bus inventory grows while the page is open (e.g. a device switched on later).
+  if (tab() === "mlgw") { bus = await api("/api/bus-devices").catch(() => bus); render(); }
+});
 $("#save").addEventListener("click", () => (bridgeDirty() ? saveBridge() : saveMlgw()));
 $("#revert").addEventListener("click", async () => { await loadBridge(); await loadMlgw(); banner(); render(); });
 window.addEventListener("beforeunload", (e) => { if (bridgeDirty() || mlgwDirty()) e.preventDefault(); });
