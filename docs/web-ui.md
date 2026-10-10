@@ -28,8 +28,8 @@ Then open `http://<pi-hostname>.local/` (or the Pi's IP) and log in.
 |---|---|
 | **Status** | Services running, what each source is playing, MLGW emulation connections |
 | **Sources** | Role (SC / AM), clock, auto-wake and wake target; sources with their providers — several per source for multi-stream, which one gets Beo4 PLAY — display names, provider names on the panel, MPD |
-| **Turntable** | Loopback, panel text, ADC gain, deck STANDBY behaviour, music recognition |
-| **Home Assistant** | Now-playing webhook: URL, which sources, cover port |
+| **Turntable** | Loopback, panel text, ADC gain, deck STANDBY behaviour, music recognition -- for the record and for other bus sources (`[ml_listen]`, optionally limited to some sources) |
+| **Home Assistant** | Now-playing webhook: URL, which sources (incl. "Bus sources (recognized)"), cover port |
 | **LIGHT keys** | Beo4 LIGHT + key → shell command |
 | **MasterLink Gateway** | MLGW emulation on/off, listen-only, login; rooms, devices, sources and favorites ([mlgw-emulation.md](mlgw-emulation.md)) |
 

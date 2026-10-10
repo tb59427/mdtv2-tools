@@ -59,6 +59,7 @@ from typing import Optional
 
 import redis
 
+from core import adc
 from core.bus import log
 from providers.base import Metadata, SourceProvider
 from providers.phono_recognize import RECOGNIZED_CHAN
@@ -445,6 +446,9 @@ class TurntableProvider(SourceProvider):
         with self._lock:
             if self._proc is not None and self._proc.poll() is None:
                 return                              # already running
+            # The bus listener may be recording from the ADC: it lets go
+            # first (the turntable has priority, see core/adc.py).
+            adc.turntable_start()
             cmd = self._pipeline()
             try:
                 # Own process group so we can kill the whole pipeline.
@@ -455,6 +459,7 @@ class TurntableProvider(SourceProvider):
             except Exception as e:
                 log(f"[tt] failed to start audio loopback: {e}", err=True)
                 self._proc = None
+                adc.turntable_stop()
                 return
             self._recognized = None
             # Read stderr as it comes: the tap reports gaps / recognitions
@@ -466,18 +471,20 @@ class TurntableProvider(SourceProvider):
     def _stop_audio(self) -> None:
         with self._lock:
             proc, self._proc = self._proc, None
-        if proc is None or proc.poll() is not None:
+        if proc is None:
             return
-        try:
-            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+        if proc.poll() is None:
             try:
-                proc.wait(timeout=2.0)
-            except subprocess.TimeoutExpired:
-                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-        except (ProcessLookupError, PermissionError):
-            pass
+                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+                try:
+                    proc.wait(timeout=2.0)
+                except subprocess.TimeoutExpired:
+                    os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
+            log("[tt] audio loopback down")
         self._recognized = None
-        log("[tt] audio loopback down")
+        adc.turntable_stop()                       # the bus listener may have the ADC again
 
     @staticmethod
     def _pump_stderr(proc: subprocess.Popen) -> None:

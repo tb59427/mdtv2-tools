@@ -7,8 +7,11 @@
 #   sensor.mdt_phono    the turntable source (display_name "BG7000" here):
 #                       title/artist/album/cover once music recognition has
 #                       identified the record, empty otherwise
+#   sensor.mdt_ml_listen  whatever else the audio master plays (CD, A.MEM,
+#                       ...) while [ml_listen] recognizes it: source, track,
+#                       title/artist/album/cover once identified
 #
-# Both share one webhook. Every POST triggers both sensors; each takes the
+# All share one webhook. Every POST triggers all sensors; each takes the
 # message only if it's for its source and otherwise keeps its state.
 #
 # secrets.yaml (the name predates the turntable sensor; kept for existing
@@ -17,11 +20,11 @@
 # On the Pi, /etc/ml-source-bridge.toml:
 #   [ha_notifier]
 #   url     = "http://<ha>:8123/api/webhook/<id>"
-#   sources = ["N.MUSIC", "BG7000"]
+#   sources = ["N.MUSIC", "BG7000", "ml_listen"]
 #
 # state: playing / paused / idle; on idle the attributes are empty.
 # cover_url: on N.MUSIC served by the Pi (http://<pi>.local:8099/cover/…),
-# on the turntable Shazam's https cover URL. The browser loads it directly
+# on the turntable and bus sources Shazam's https cover URL. The browser loads it directly
 # -- fine while HA is opened over http in the LAN.
 template:
   - trigger:
@@ -54,3 +57,32 @@ template:
           artist: "{{ trigger.json.artist | default('') if trigger.json.source == 'BG7000' else this.attributes.get('artist', '') }}"
           album: "{{ trigger.json.album | default('') if trigger.json.source == 'BG7000' else this.attributes.get('album', '') }}"
           cover_url: "{{ trigger.json.cover_url | default('') if trigger.json.source == 'BG7000' else this.attributes.get('cover_url', '') }}"
+      - name: MDT ML Listen
+        unique_id: mdt_ml_listen
+        # Takes every message from the bus listener ("origin": "ml_listen").
+        # On idle only from the source it shows, so a source that stopped
+        # earlier can't clear one that's playing now.
+        state: >-
+          {% set mine = trigger.json.origin | default('') == 'ml_listen' %}
+          {% if mine and (trigger.json.state == 'playing' or trigger.json.source == this.attributes.get('source', '')) %}{{ trigger.json.state | default('idle') }}
+          {%- elif this.state in ['unknown', 'unavailable'] %}idle
+          {%- else %}{{ this.state }}{% endif %}
+        attributes:
+          source: >-
+            {% set mine = trigger.json.origin | default('') == 'ml_listen' %}
+            {{ trigger.json.source if mine and trigger.json.state == 'playing' else this.attributes.get('source', '') }}
+          track: >-
+            {% set mine = trigger.json.origin | default('') == 'ml_listen' and (trigger.json.state == 'playing' or trigger.json.source == this.attributes.get('source', '')) %}
+            {{ trigger.json.track | default('') if mine else this.attributes.get('track', '') }}
+          title: >-
+            {% set mine = trigger.json.origin | default('') == 'ml_listen' and (trigger.json.state == 'playing' or trigger.json.source == this.attributes.get('source', '')) %}
+            {{ trigger.json.title | default('') if mine else this.attributes.get('title', '') }}
+          artist: >-
+            {% set mine = trigger.json.origin | default('') == 'ml_listen' and (trigger.json.state == 'playing' or trigger.json.source == this.attributes.get('source', '')) %}
+            {{ trigger.json.artist | default('') if mine else this.attributes.get('artist', '') }}
+          album: >-
+            {% set mine = trigger.json.origin | default('') == 'ml_listen' and (trigger.json.state == 'playing' or trigger.json.source == this.attributes.get('source', '')) %}
+            {{ trigger.json.album | default('') if mine else this.attributes.get('album', '') }}
+          cover_url: >-
+            {% set mine = trigger.json.origin | default('') == 'ml_listen' and (trigger.json.state == 'playing' or trigger.json.source == this.attributes.get('source', '')) %}
+            {{ trigger.json.cover_url | default('') if mine else this.attributes.get('cover_url', '') }}

@@ -265,6 +265,37 @@ display_name = "N.RADIO"        # optional; up to 11 chars ASCII
 # prev = 0xF3    # BG.<-Ret
 
 
+
+# ---- music recognition on the bus (ml_listen) -- OFF by default -------------
+# The HAT's ADC also hears the MasterLink audio lines. With this on, whenever
+# the audio master plays a source this bridge doesn't provide itself (CD,
+# A.MEM, RADIO, ...), the bridge listens along and identifies the music the
+# same way the turntable does: title / artist / album / cover on
+# state:nowplaying, keyed by that source's byte, with "origin": "ml_listen"
+# (ha-notifier: put "ml_listen" into its sources). Nothing goes back onto
+# the bus; snippets (~10 s, mono) go to Shazam, nothing is written to disk.
+#
+# The ADC is shared with the turntable, which has priority: while the record
+# plays, the listener pauses. Each sets the ADC input to its own on start
+# (listener: VIN1 = ML audio; turntable: VIN4 = phono).
+#
+# Same caveat as [turntable] recognize: shazamio is an UNOFFICIAL Shazam
+# client in its own venv, which install.sh sets up when this is enabled --
+# re-run install.sh after enabling.
+# [ml_listen]
+# enabled = true
+# sources = ["CD", "A.MEM"]      # display names or source bytes ("0x8d");
+#                                # omit = every source not our own
+# recognize_snippet_s  = 10
+# recognize_silence_db = -50.0   # quieter than this = gap between tracks;
+#                                # on CD the audio master's track number also
+#                                # starts a new track
+# adc_input_reg = 0x41           # PCM1862 input mux: 0x41 = VIN1 (ML audio);
+#                                # VIN2 (0x42) carries the same
+# pga_db        = 0.0            # ML audio is line level
+# capture_device   = "hw:sndrpihifiberry,0"
+# recognize_python = "/opt/mdt-tools/.recognize-venv/bin/python"
+
 # ---- LIGHT-key home-automation hook ----------------------------------------
 # Pressing the LIGHT key on a Beo4 remote opens a "light channel": the
 # VM/AM then forwards every following keypress to the MLGW address
@@ -328,10 +359,11 @@ display_name = "N.RADIO"        # optional; up to 11 chars ASCII
 # [ha_notifier]
 # enabled  = true
 # url      = "http://homeassistant.local:8123/api/webhook/<webhook_id>"
-# sources  = ["N.MUSIC", "BG7000"]
+# sources  = ["N.MUSIC", "BG7000", "ml_listen"]
 #                            # display_name or source byte ("0x7a"); omit = all
-#                            # sources. Each needs its own sensor in HA's
-#                            # webhook block (mdt_webhook.yaml).
+#                            # sources. "ml_listen" = every source the bus
+#                            # listener reports ([ml_listen]). Each needs its
+#                            # sensor in HA's webhook block (mdt_webhook.yaml).
 # timeout_s        = 3       # per POST
 # debounce_ms      = 300     # send a change once it's been stable this long
 # idle_debounce_ms = 3000    # ... longer when leaving "playing": swallows the

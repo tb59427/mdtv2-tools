@@ -86,6 +86,9 @@ sleep 5; systemctl is-active mdt-bridge-test mdt-notifier-test mdt-mlgw-test mdt
 - `--log-file ""` keeps the test bridge out of `/tmp/mdt.log`, which the
   installed services share.
 - **Never run both bridges at once** -- they claim the same ML address.
+- **Stopping a bridge stops the music:** on shutdown the bridge sends a
+  RELEASE to all devices, and the audio master stops whatever it plays --
+  also a CD. Start it again after switching.
 
 Logs and state:
 

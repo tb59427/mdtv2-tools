@@ -147,6 +147,7 @@ def toml_to_model(cfg: dict) -> dict:
     hn = cfg.get("ha_notifier") or {}
     lh = cfg.get("light_handler") or {}
     mg = cfg.get("mlgw") or {}
+    ml = cfg.get("ml_listen") or {}
     return {
         "role": cfg.get("role", "sc"),
         "broadcast_clock": cfg.get("broadcast_clock", True),
@@ -167,6 +168,8 @@ def toml_to_model(cfg: dict) -> dict:
                       "recognize": tt.get("recognize", False),
                       "pga_db": float(tt.get("pga_db", 0.0)),
                       "standby_ml_on_stop": tt.get("standby_ml_on_stop", True)},
+        "ml_listen": {"enabled": ml.get("enabled", False),
+                      "sources": [str(x) for x in ml.get("sources") or []]},
         "ha_notifier": {"enabled": hn.get("enabled", False),
                         "url": hn.get("url", ""),
                         "sources": list(hn.get("sources") or []),
@@ -232,6 +235,12 @@ def apply_model(doc, m: dict, cfg: dict) -> None:
         _set(t, "metadata_title", m["turntable"]["metadata_title"], default="PHONO")
         _set(t, "pga_db", float(m["turntable"]["pga_db"]), default=0.0)
 
+    ml = m["ml_listen"]
+    if ml["enabled"] or "ml_listen" in doc:
+        t = _table(doc, "ml_listen")
+        _set(t, "enabled", bool(ml["enabled"]))
+        _set(t, "sources", [str(x).strip() for x in ml["sources"] if str(x).strip()] or None)
+
     hn = m["ha_notifier"]
     if hn["enabled"] or "ha_notifier" in doc:
         t = _table(doc, "ha_notifier")
@@ -265,7 +274,7 @@ def affected_services(old: dict, new: dict) -> list[str]:
     """Which services must restart for a model change."""
     out = []
     bridge_keys = ("role", "broadcast_clock", "auto_wake", "wake_target", "sources",
-                   "provider_displays", "mpd", "turntable", "light_handler")
+                   "provider_displays", "mpd", "turntable", "ml_listen", "light_handler")
     if any(old[k] != new[k] for k in bridge_keys):
         out.append("ml-source-bridge")
     if old["ha_notifier"] != new["ha_notifier"]:
