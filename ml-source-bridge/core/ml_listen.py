@@ -64,6 +64,9 @@ _RESTART_BACKOFF_S = 10.0    # after the capture died unexpectedly
 # master's source but isn't reported back); the audio itself doesn't lie.
 # Gaps between tracks last a few seconds.
 _SILENCE_IDLE_S = 20.0
+# Hold a new recognition back this long for the MusicBrainz album, so HA
+# doesn't first show Shazam's compilation and then the correction.
+_ALBUM_WAIT_S = 6.0
 
 
 def _parse_sources(raw) -> tuple[set[int], set[str]]:
@@ -121,6 +124,7 @@ class BusListener:
         self._recognized: Optional[dict] = None
         self._silent_since: Optional[float] = None   # tap reported a gap at
         self._silent = False                         # ... and we reported idle
+        self._album_pending = False                  # waiting for MusicBrainz
         self._suspended = False
         self._retry_at = 0.0
 
@@ -220,6 +224,7 @@ class BusListener:
                     log(f"[listen] {name}: track {self._track} -> {track}")
                     self._signal_new_track()
                     self._recognized = None
+                    self._album_pending = False
                 self._track = track
                 self._publish()
 
@@ -275,6 +280,7 @@ class BusListener:
                              name=f"ml-listen-{tag}", daemon=True).start()
         self._src, self._src_name, self._track = src, name, track
         self._recognized = None
+        self._album_pending = False
         self._silent_since, self._silent = None, False
         log(f"[listen] listening to {name} (0x{src:02x})")
         self._publish()
@@ -289,6 +295,7 @@ class BusListener:
         self._kill(rec)
         src, name = self._src, self._src_name
         self._recognized = None
+        self._album_pending = False
         self._src, self._track = None, None
         self._silent_since, self._silent = None, False
         log(f"[listen] stopped listening to {name}")
@@ -353,7 +360,7 @@ class BusListener:
     # ---- results -------------------------------------------------------------
 
     def _blob(self, src: int, name: str, *, state: str) -> dict[str, str]:
-        rec = self._recognized if state == "playing" else None
+        rec = self._recognized if state == "playing" and not self._album_pending else None
         return {
             "source": name, "source_byte": f"0x{src:02x}",
             "provider": ORIGIN if state == "playing" else "",
@@ -395,9 +402,14 @@ class BusListener:
                     return                      # re-confirmed (keeps a looked-up album)
                 self._recognized = info
                 if self._album_lookup:
+                    self._album_pending = True
                     threading.Thread(target=self._lookup_album, name="ml-listen-mb",
                                      args=(dict(info), str(msg.get("isrc") or ""), self._track),
                                      daemon=True).start()
+                    t = threading.Timer(_ALBUM_WAIT_S, self._album_timeout, args=(info,))
+                    t.daemon = True
+                    t.start()
+                    return                      # published once the album is known
             elif self._recognized is None:
                 return                          # "cleared" with nothing shown
             elif self._track is not None:
@@ -408,6 +420,7 @@ class BusListener:
                 return
             else:
                 self._recognized = None
+                self._album_pending = False
             self._publish()
 
     def _lookup_album(self, info: dict, isrc: str, track: Optional[int]) -> None:
@@ -415,18 +428,28 @@ class BusListener:
         original from MusicBrainz, if found, and its cover if it has one."""
         found = musicbrainz.original_album(info["title"], info["artist"],
                                            isrc=isrc, track=track)
-        if not found or not found["album"]:
-            return
         with self._lock:
             cur = self._recognized
             if not cur or (cur["artist"], cur["title"]) != (info["artist"], info["title"]):
                 return                          # the track changed meanwhile
-            if found["album"] != cur["album"]:
-                log(f"[listen] album: {cur['album'] or '?'} -> {found['album']} (MusicBrainz)")
-            cur["album"] = found["album"]
-            if found["cover_url"]:
-                cur["cover_url"] = found["cover_url"]
+            was_pending, self._album_pending = self._album_pending, False
+            if found and found["album"]:
+                if found["album"] != cur["album"]:
+                    log(f"[listen] album: {cur['album'] or '?'} -> {found['album']} (MusicBrainz)")
+                cur["album"] = found["album"]
+                if found["cover_url"]:
+                    cur["cover_url"] = found["cover_url"]
+            elif not was_pending:
+                return                          # nothing new to show
             self._publish()
+
+    def _album_timeout(self, info: dict) -> None:
+        """MusicBrainz is slow or unreachable: show Shazam's result now; a
+        later answer still corrects it."""
+        with self._lock:
+            if self._album_pending and self._recognized is info:
+                self._album_pending = False
+                self._publish()
 
     # ---- thread ----------------------------------------------------------------
 

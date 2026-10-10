@@ -171,8 +171,9 @@ How it works (`core/ml_listen.py`):
   artist -- and takes the release that is an Album without secondary type
   (no Compilation, Live, ...), preferring the one with the track at the
   audio master's track number, else the earliest. The cover then comes from
-  the Cover Art Archive, if it has one. No match or no network: Shazam's
-  album stays.
+  the Cover Art Archive, if it has one. A new recognition is held back for
+  up to 6 s for this, so HA doesn't first show the compilation. No match or
+  no network: Shazam's album stays.
 * **ADC sharing** (`core/adc.py`): only one process can record. The
   turntable has priority -- when it starts its loopback, the listener stops
   first and resumes afterwards. Each sets the ADC input mux to its own input
