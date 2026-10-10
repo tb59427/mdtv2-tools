@@ -159,6 +159,11 @@ How it works (`core/ml_listen.py`):
   `"origin": "ml_listen"` and the track number in `"track"`. ha-notifier
   forwards them when `[ha_notifier] sources` contains `"ml_listen"` (or the
   source's name); HA shows them via `sensor.mdt_ml_listen`.
+* **Silence = idle:** the state tracker can miss a stop -- a source-less
+  RELEASE (e.g. from a bridge shutting down) stops the audio master's
+  source without it being reported. So after 20 s of silence (the tap's gap
+  detector) the listener reports the source idle while it keeps listening,
+  and playing again when the music returns.
 * **Original album** (`core/musicbrainz.py`, `album_lookup = true` by
   default): Shazam often names a compilation instead of the album a track
   comes from. After each recognition the listener looks the recording up on

@@ -59,6 +59,11 @@ _REG_PGA_L, _REG_PGA_R = 0x01, 0x02
 _REG_ADC1L_IN, _REG_ADC1R_IN = 0x06, 0x07
 _ADC_IN_ML = 0x41            # VIN1, single-ended: the ML audio lines
 _RESTART_BACKOFF_S = 10.0    # after the capture died unexpectedly
+# Silence longer than this while "playing": report the source idle anyway.
+# The state tracker can miss a stop (a source-less RELEASE stops the audio
+# master's source but isn't reported back); the audio itself doesn't lie.
+# Gaps between tracks last a few seconds.
+_SILENCE_IDLE_S = 20.0
 
 
 def _parse_sources(raw) -> tuple[set[int], set[str]]:
@@ -114,6 +119,8 @@ class BusListener:
         self._src_name = ""
         self._track: Optional[int] = None
         self._recognized: Optional[dict] = None
+        self._silent_since: Optional[float] = None   # tap reported a gap at
+        self._silent = False                         # ... and we reported idle
         self._suspended = False
         self._retry_at = 0.0
 
@@ -206,6 +213,7 @@ class BusListener:
                     return
                 self._start_capture(src, name, self._track_of(am))
                 return
+            self._check_silence()
             track = self._track_of(am)
             if track is not None and track != self._track:
                 if self._track is not None:
@@ -267,6 +275,7 @@ class BusListener:
                              name=f"ml-listen-{tag}", daemon=True).start()
         self._src, self._src_name, self._track = src, name, track
         self._recognized = None
+        self._silent_since, self._silent = None, False
         log(f"[listen] listening to {name} (0x{src:02x})")
         self._publish()
 
@@ -281,6 +290,7 @@ class BusListener:
         src, name = self._src, self._src_name
         self._recognized = None
         self._src, self._track = None, None
+        self._silent_since, self._silent = None, False
         log(f"[listen] stopped listening to {name}")
         if publish_idle and src is not None:
             self._write(src, self._blob(src, name, state="idle"))
@@ -307,16 +317,38 @@ class BusListener:
             except ProcessLookupError:
                 pass
 
-    @staticmethod
-    def _pump_stderr(proc: subprocess.Popen, tag: str) -> None:
+    def _pump_stderr(self, proc: subprocess.Popen, tag: str) -> None:
         for raw in iter(proc.stderr.readline, b""):
             line = raw.decode("utf-8", "replace").rstrip()
             if not line:
                 continue
-            if line.startswith("[tap]"):
-                log(f"[listen] {line}")
-            else:
+            if not line.startswith("[tap]"):
                 log(f"[listen] {tag}: {line}", err=True)
+                continue
+            log(f"[listen] {line}")
+            # The tap's gap detector: "gap" = silent for 1.5 s, "new track" =
+            # music again. Drives the silence check in _check_silence().
+            with self._lock:
+                if proc is not self._tap:
+                    continue                    # an old capture's last words
+                if line == "[tap] gap":
+                    self._silent_since = time.monotonic()
+                elif line == "[tap] new track":
+                    self._silent_since = None
+                    if self._silent:
+                        self._silent = False
+                        log(f"[listen] {self._src_name}: music again")
+                        self._publish()
+
+    def _check_silence(self) -> None:
+        """With self._lock held: report idle after a long silence."""
+        if (self._rec is None or self._silent or self._silent_since is None
+                or time.monotonic() - self._silent_since < _SILENCE_IDLE_S):
+            return
+        self._silent = True
+        log(f"[listen] {self._src_name}: silent for {_SILENCE_IDLE_S:.0f} s -- "
+            f"reporting idle (still listening)")
+        self._write(self._src, self._blob(self._src, self._src_name, state="idle"))
 
     # ---- results -------------------------------------------------------------
 
@@ -337,7 +369,7 @@ class BusListener:
 
     def _publish(self) -> None:
         """With self._lock held: the current view of the source we listen to."""
-        if self._src is not None:
+        if self._src is not None and not self._silent:
             self._write(self._src, self._blob(self._src, self._src_name,
                                               state="playing"))
 

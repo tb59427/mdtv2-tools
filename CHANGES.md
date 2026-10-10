@@ -82,6 +82,9 @@ here is Philip's work, unchanged.
   is a plain Album, preferring the one with the track at the CD's track
   number, and takes its Cover Art Archive cover. `phono_recognize.describe`
   passes Shazam's ISRC on.
+- After 20 s of silence the listener reports the source idle (and playing
+  again when the music returns): the state tracker misses a stop caused by
+  a source-less RELEASE.
 - ha-notifier: `"ml_listen"` in `sources` forwards all of them. HA:
   `sensor.mdt_ml_listen` in `mdt_webhook.yaml`; the button-card shows bus
   sources too (`bus_image`). Web UI: switch and source filter on the
