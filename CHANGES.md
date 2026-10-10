@@ -65,6 +65,13 @@ here is Philip's work, unchanged.
   `providers/phono_recognize.py`. Optional test snippets via `tap_dir`
   (meant for a tmpfs).
 
+### Shutdown RELEASE only for our own sources
+
+- On shutdown the bridge sent a RELEASE to all devices unconditionally;
+  the audio master then stopped whatever it played, e.g. a CD, on every
+  bridge restart. Now only when one of our sources is in use (a provider
+  plays, the bus granted it to us, or the state tracker sees it on the bus).
+
 ### Music recognition on the bus
 
 - Optional (`[ml_listen] enabled = true`, `core/ml_listen.py`): the HAT's ADC

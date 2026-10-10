@@ -39,6 +39,7 @@ Config file (TOML, see config.toml.example for every option):
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import signal
 import sys
@@ -389,6 +390,31 @@ def _stream_watcher_factory(role: Role, ctx: Context,
 CTL_RESTART = "link:ctl:restart"
 
 
+def _our_source_on_bus(role: Role, providers: dict, r) -> bool:
+    """Is one of our sources in use -- playing, granted to us, or what the
+    state tracker sees on the bus? Only then does our shutdown RELEASE make
+    sense: a RELEASE to all stops whatever the audio master plays, e.g. a CD
+    that has nothing to do with us."""
+    for prov in providers.values():
+        try:
+            if prov.is_playing():
+                return True
+        except Exception:
+            pass
+    if getattr(role, "_granted", None):
+        return True
+    try:
+        raw = r.get("state:ml")
+        blob = json.loads(raw) if raw else {}
+        for slot in ("am", "vm"):
+            src = (blob.get(slot) or {}).get("source")
+            if src is not None and int(str(src), 16) in providers:
+                return True
+    except Exception:
+        return True                         # can't tell: release as before
+    return False
+
+
 def check_config(cfg: dict, args) -> list[str]:
     """Everything main() would reject about `cfg`, without touching the bus
     or starting anything. Returns the problems found (empty = OK)."""
@@ -730,10 +756,14 @@ def main() -> int:
         log("[main] shutting down")
         stop.set()                  # also on an exception, not just signals
         if not args.dry_run:
-            try:
-                bus.send(B.release(frm=role.own_address))
-            except Exception:
-                pass
+            if _our_source_on_bus(role, providers, bus.r):
+                try:
+                    bus.send(B.release(frm=role.own_address))
+                except Exception:
+                    pass
+            else:
+                log("[main] none of our sources in use -- no RELEASE "
+                    "(it would stop what the audio master plays)")
         if listener is not None:
             try:
                 listener.stop()
