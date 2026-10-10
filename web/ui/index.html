@@ -252,8 +252,13 @@ function renderTurntable(page) {
       el("div", {class: "row"}, check(t, "standby_ml_on_stop", "STANDBY on the deck switches the ML system off"))),
     el("div", {class: "card"}, el("h2", {}, "Music recognition"),
       el("div", {class: "row"}, check(t, "recognize", "Identify the record via Shazam")),
+      el("div", {class: "row"}, check(bridge.ml_listen, "enabled", "Also identify other sources on the bus",
+        "— CD, A.MEM, … whatever the audio master plays and the Pi doesn't provide")),
+      bridge.ml_listen.enabled ? el("div", {class: "row"}, el("label", {class: "f stack grow"}, "Only these sources",
+        el("input", {value: bridge.ml_listen.sources.join(", "), placeholder: "empty = all, e.g. CD, A.MEM",
+          oninput: (e) => { bridge.ml_listen.sources = e.target.value.split(",").map((x) => x.trim()).filter(Boolean); changed(); }}))) : null,
       el("div", {class: "hint"}, "Shows title, artist, album and cover once two attempts agree. Uses shazamio, an unofficial Shazam client — " +
-        "after switching it on, run install.sh once so it installs shazamio."),
+        "after switching either on, run install.sh once so it installs shazamio. On the bus the turntable has priority (both need the ADC)."),
     ),
     el("div", {class: "hint"}, "Devices, RIAA and DL'80 codes stay as set in the config file."));
 }
@@ -269,7 +274,11 @@ function renderHA(page) {
         el("div", {class: "row"}, text(h, "url", "Webhook URL", {placeholder: "http://homeassistant.local:8123/api/webhook/…"})),
         el("div", {class: "row"}, el("span", {class: "hint"}, "Sources:"), names.map((n) => el("label", {class: "f"},
           el("input", {type: "checkbox", checked: h.sources.includes(n), onchange: (e) => {
-            h.sources = e.target.checked ? [...h.sources, n] : h.sources.filter((x) => x !== n); changed(); }}), n))),
+            h.sources = e.target.checked ? [...h.sources, n] : h.sources.filter((x) => x !== n); changed(); }}), n)),
+          bridge.ml_listen.enabled ? el("label", {class: "f"},
+            el("input", {type: "checkbox", checked: h.sources.includes("ml_listen"), onchange: (e) => {
+              h.sources = e.target.checked ? [...h.sources, "ml_listen"] : h.sources.filter((x) => x !== "ml_listen"); changed(); }}),
+            "Bus sources (recognized)") : null),
         el("div", {class: "row"}, text(h, "cover_port", "Cover art port", {type: "number"})),
         el("div", {class: "hint"}, "Each source needs its own sensor in HA's webhook block (home-assistant/templates/mdt_webhook.yaml).")] : null));
 }

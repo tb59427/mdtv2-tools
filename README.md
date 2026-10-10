@@ -7,12 +7,13 @@ Philip's work it adds:
 - **Sendspin** (e.g. Music Assistant) and **MPD** as audio providers
 - **several providers per B&O source** -- e.g. Sendspin and AirPlay sharing
   N.MUSIC, whoever starts last plays
-- **Music recognition for the turntable**: identifies what's on the record
-  via Shazam (shazamio) from the audio alone and shows title, artist, album
-  and cover -- optional, `recognize = true`
+- **Music recognition** via Shazam (shazamio) from the audio alone -- title,
+  artist, album and cover: for the turntable (`recognize = true`), and for
+  whatever else the ML bus carries, e.g. a CD on the BeoSound
+  (`[ml_listen]`); both optional
 - **Home Assistant integration**: the Pi reports what each source plays
   (including AirPlay straight from an iPhone, with cover art, and the
-  recognized record), plus HA automations and one dashboard card for it all
+  recognized record or CD), plus HA automations and one dashboard card for it all
 - **Web UI**: configure sources, providers, turntable, Home Assistant and
   LIGHT keys in a browser -- validated by the bridge, comments in the config
   kept
@@ -59,6 +60,7 @@ Receive and send any remote control messages or analog audio streams via MasterL
 | **DL'80 turntable control** | Remote control your DL enabled BeoGram turntable | `dl-docs/dl80-beogram/`, `dl-scripts/dl80-turntable/` |
 | **Turntable as an ML source** | Play a DL'80 Beogram *through* your ML music system: pick the source on your Beo remote to start the record, Step Up/Down to skip tracks, and the analogue audio is looped ADC→DAC onto ML. Opt-in per source (typically N.RADIO), Feed it line level (its own preamp, or an external phono stage); the software RIAA + high ADC gain option is a dev-only path with poor sound quality. | `ml-source-bridge/` (`provider = "turntable"`) |
 | **Music recognition (turntable)** | Optional: identifies the record playing on the turntable source via Shazam (shazamio, unofficial client) from the audio alone -- a new track is detected from the silent gap -- and shows title / artist / album / cover on panels that display source texts and in Home Assistant. A result is shown only when two attempts agree. Nothing is written to disk. | `ml-source-bridge/` (`[turntable] recognize = true`) |
+| **Music recognition (bus sources)** | Optional: the HAT's ADC also hears the MasterLink audio lines, so while the audio master plays a source the Pi doesn't provide (CD, A.MEM, ...), the bridge listens along and identifies the music the same way -- title / artist / album / cover for Home Assistant. A new CD track number starts a new recognition. Shares the ADC with the turntable, which has priority. | `ml-source-bridge/` (`[ml_listen]`) |
 | **DL'86 music-system control** | Remote control your DL enabled BeoCenter or BeoMaster turntable | `dl-docs/dl86-music-system/`, `dl-scripts/dl86-system/` |
 | **Phono capture (turntable)** | Sample script to do a 60 s record from a turntable into FLAC: triggers `BG.Play`, configures the ADC, records and optionally applies a software RIAA de-emphasis. | `dl-scripts/dl80-turntable/` |
 | **CD capture (music system)** | Sample script to do a 60 s record from a CD source: triggers DL'86 CD on, configures ADC, records, encodes FLAC and sends standby. | `dl-scripts/dl86-system/` |
@@ -224,6 +226,25 @@ source texts, and in Home Assistant. It uses shazamio, an unofficial Shazam
 client, which `install.sh` installs into its own venv only when this is set,
 so **re-run `install.sh` after enabling it**. Details:
 [bridge README](ml-source-bridge/README.md#music-recognition-optional).
+
+### Music recognition on the bus
+
+Recognizes what *other* sources play -- a CD on the BeoSound, A.MEM, radio
+-- by listening to the MasterLink audio lines through the HAT's ADC:
+
+```toml
+[ml_listen]
+enabled = true
+# sources = ["CD", "A.MEM"]   # omit = every source the Pi doesn't provide
+
+[ha_notifier]
+sources = ["N.MUSIC", "BG7000", "ml_listen"]   # "ml_listen" = all of them
+```
+
+Results go to Home Assistant (`sensor.mdt_ml_listen`, shown on the same
+card). Same shazamio venv as the turntable -- **re-run `install.sh` after
+enabling**. Details:
+[bridge README](ml-source-bridge/README.md#music-recognition-on-the-bus-ml_listen).
 
 ### Home Assistant
 

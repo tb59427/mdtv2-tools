@@ -1,7 +1,8 @@
-"""Music recognition for the turntable: what's on the record, via Shazam.
+"""Music recognition: what's playing, via Shazam -- on the turntable, and
+on other sources the ML bus carries (core/ml_listen.py).
 
 Runs inside audio_tap.py's worker process (never in the audio path) when
-[turntable] recognize = true. The Shazam call itself -- fingerprinting is
+[turntable] recognize = true or [ml_listen] is enabled. The Shazam call itself -- fingerprinting is
 CPU-heavy and holds the GIL -- runs in a helper process (this file with
 --serve), so the worker keeps reading audio meanwhile. Needs shazamio -- an
 unofficial Shazam client that may break whenever Shazam changes its API --
@@ -20,8 +21,9 @@ Policy, per track:
     a gap. Two misses in a row, or two agreeing different results, replace
     or clear what's shown.
 
-Results go out on redis `link:phono:recognized` (pub/sub only -- nothing is
-stored, nothing touches the SD card):
+Results go out on redis `link:phono:recognized` (the bus listener uses
+`link:ml:recognized`; pub/sub only -- nothing is stored, nothing touches
+the SD card):
 
     {"state": "confirmed", "title": ..., "artist": ..., "album": ..., "cover_url": ...}
     {"state": "cleared"}
@@ -249,14 +251,14 @@ class Recognizer:
             self.attempt(self.clock())
 
 
-def redis_publisher(host: str, port: int,
-                    log: Callable[[str], None]) -> Callable[[dict], None]:
+def redis_publisher(host: str, port: int, log: Callable[[str], None],
+                    channel: str = RECOGNIZED_CHAN) -> Callable[[dict], None]:
     import redis
     r = redis.StrictRedis(host=host, port=port, db=0)
 
     def publish(msg: dict) -> None:
         try:
-            r.publish(RECOGNIZED_CHAN, json.dumps(msg, ensure_ascii=False))
+            r.publish(channel, json.dumps(msg, ensure_ascii=False))
         except redis.exceptions.RedisError as e:
             log(f"[recognize] redis publish failed: {e}")
     return publish

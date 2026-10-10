@@ -21,12 +21,18 @@ Two processes, so nothing can hold up the audio:
 
 Only one process can open the ADC, which is why this taps the existing
 pipeline instead of recording separately.
+
+The bus listener (core/ml_listen.py) runs it on its own, without the DAC
+(`arecord ... | audio_tap.py --recognize --channel link:ml:recognized`,
+stdout to /dev/null), and sends SIGUSR1 when the audio master reports a
+new track number -- treated like a gap: a new track starts.
 """
 from __future__ import annotations
 
 import argparse
 import collections
 import os
+import signal
 import sys
 import threading
 import time
@@ -159,7 +165,8 @@ def run_worker(fd: int, args: argparse.Namespace) -> None:
             import phono_recognize as pr
             recognizer = pr.Recognizer(
                 rate=args.rate, snapshot=ring.snapshot,
-                publish=pr.redis_publisher(args.redis_host, args.redis_port, log),
+                publish=pr.redis_publisher(args.redis_host, args.redis_port, log,
+                                           channel=args.channel or pr.RECOGNIZED_CHAN),
                 log=log, snippet_s=args.recognize_s)
             threading.Thread(target=recognizer.run, name="recognize",
                              daemon=True).start()
@@ -173,6 +180,12 @@ def run_worker(fd: int, args: argparse.Namespace) -> None:
         if recognizer is not None:
             recognizer.new_track()
     gaps = GapDetector(args.rate, on_track, silence_db=args.silence_db)
+
+    # SIGUSR1 = "new track" from outside (forwarded by the main process).
+    # Only flag it here; the read loop acts on it, so the handler never
+    # runs into a lock the interrupted code holds.
+    track_signal = threading.Event()
+    signal.signal(signal.SIGUSR1, lambda *_: track_signal.set())
 
     if args.dir:
         out_dir = Path(args.dir)
@@ -209,6 +222,9 @@ def run_worker(fd: int, args: argparse.Namespace) -> None:
             pcm = np.clip(mono, -32768, 32767).astype("<i2")
             ring.add(pcm.tobytes())
             gaps.feed(pcm)
+            if track_signal.is_set():
+                track_signal.clear()
+                on_track()
     finally:
         stop.set()
         if recognizer is not None:
@@ -228,6 +244,8 @@ def main() -> int:
                     help="snippet length per recognition attempt")
     ap.add_argument("--silence-db", type=float, default=-50.0,
                     help="below this a stretch counts as a gap between tracks")
+    ap.add_argument("--channel", default="",
+                    help="redis channel for results (default link:phono:recognized)")
     ap.add_argument("--redis-host", default="localhost")
     ap.add_argument("--redis-port", type=int, default=6379)
     ap.add_argument("--dir", default="", help="write test snippets here (tmpfs!)")
@@ -240,7 +258,8 @@ def main() -> int:
     tee = None
     if args.recognize or args.dir:
         r, w = os.pipe()
-        if os.fork() == 0:                      # worker
+        pid = os.fork()
+        if pid == 0:                            # worker
             os.close(w)
             # Let go of the pipeline's stdin/stdout, or arecord/aplay never
             # see EOF when the main process exits.
@@ -253,6 +272,8 @@ def main() -> int:
                 log(f"worker died: {e}")
             os._exit(0)
         os.close(r)
+        # "New track" from the bus listener: pass it on to the worker.
+        signal.signal(signal.SIGUSR1, lambda *_: os.kill(pid, signal.SIGUSR1))
         os.set_blocking(w, False)
         try:                                    # Linux: ~2.7 s of S32 stereo
             import fcntl

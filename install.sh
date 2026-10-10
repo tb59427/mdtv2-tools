@@ -348,14 +348,15 @@ else
 fi
 
 # ---------- 9b. music recognition venv (opt-in) ------------------------------
-# Only when [turntable] recognize = true: shazamio (an unofficial Shazam
-# client) isn't packaged for Debian, so it gets its own venv; numpy and
-# redis come from the system packages.
+# Only when [turntable] recognize = true or [ml_listen] enabled = true:
+# shazamio (an unofficial Shazam client) isn't packaged for Debian, so it
+# gets its own venv; numpy and redis come from the system packages.
 RECOGNIZE_VENV="$INSTALL_ROOT/.recognize-venv"
 if python3 - "$BRIDGE_TOML" <<'PY' 2>/dev/null
 import sys, tomllib
 cfg = tomllib.load(open(sys.argv[1], "rb"))
-sys.exit(0 if (cfg.get("turntable") or {}).get("recognize") else 1)
+sys.exit(0 if (cfg.get("turntable") or {}).get("recognize")
+         or (cfg.get("ml_listen") or {}).get("enabled") else 1)
 PY
 then
     note "music recognition venv ($RECOGNIZE_VENV)"
@@ -369,7 +370,7 @@ then
         ok "shazamio installed"
     fi
 else
-    skip "music recognition off ([turntable] recognize) -- no venv"
+    skip "music recognition off ([turntable] recognize, [ml_listen]) -- no venv"
 fi
 
 # ---------- 10. reloads ------------------------------------------------------

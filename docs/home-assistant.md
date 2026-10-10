@@ -17,6 +17,9 @@ What you get:
   album and cover once music recognition has identified the track, else
   "Schallplatte" in front of a default image (a placeholder drawing, or a
   photo of your own deck).
+- Optionally the same for other bus sources the Pi listens to (CD on the
+  BeoSound, A.MEM, ...; `[ml_listen]` on the Pi): source, track number,
+  title, artist, album and cover once recognized.
 - Beo4 control: `N.MUSIC` + digit picks a radio station, + colour key starts
   a playlist.
 
@@ -59,6 +62,7 @@ media_player.masterlink_bridge_ma (MA's view) ───────────�
 | `media_player.masterlink_bridge_ma` | MA player | Music Assistant -> Pi (Sendspin) -> N.MUSIC |
 | `sensor.mdt_n_music` | trigger template sensor (webhook) | What the Pi reports for N.MUSIC: provider, state, title / artist / album, cover URL |
 | `sensor.mdt_phono` | trigger template sensor (same webhook) | The turntable: state, and title / artist / album / cover once recognized |
+| `sensor.mdt_ml_listen` | trigger template sensor (same webhook) | Other bus sources the Pi recognizes (`[ml_listen]`): state, source, track, title / artist / album / cover |
 | `sensor.n_music_quelle` | template sensor | Source label: `Internet Radio` / `Tidal` / `Music Assistant` / `Extern` / provider name from the Pi (e.g. `Apple Music`) / `–` |
 | `sensor.n_music_inhalt` | template sensor | Station or playlist name; album for non-MA streams; `–` |
 | `input_select.radio_station_list` | helper | Radio stations = MA favourites, filled by an automation |
@@ -189,6 +193,7 @@ Settings at the top of the card, under `variables`:
 |---|---|---|
 | `phono_image` | `/local/mdt/turntable.svg` | Turntable background while no track is recognized -- e.g. a photo of your own deck in `/config/www/mdt/` (`/local/mdt/bg7000.jpg`) or any URL |
 | `phono_label` | `BG7000` | Header label for the turntable |
+| `bus_image` | `''` | Background for a bus source (CD, ...) until its track is recognized; empty = theme colour |
 
 - Visible while N.MUSIC plays (`sensor.n_music_quelle` isn't `–`) or the
   turntable plays (in edit mode it always shows).
@@ -197,6 +202,9 @@ Settings at the top of the card, under `variables`:
   `sensor.mdt_n_music`.
 - **Turntable:** header *BG7000 · album*, title, artist, cover -- or
   "Schallplatte" and the default image while nothing is recognized.
+- **Bus source** (`sensor.mdt_ml_listen` playing, turntable not): header
+  *CD · Titel 3 · album*, title, artist, cover -- or the source name while
+  nothing is recognized.
 - Buttons only for Music Assistant; HA can't control the other providers
   or the turntable.
 
@@ -213,6 +221,9 @@ Settings at the top of the card, under `variables`:
 - **Turntable:** titles need `[turntable] recognize = true` on the Pi (see
   the bridge README); without it the card shows the default image whenever
   the turntable plays.
+- **Bus sources:** need `[ml_listen] enabled = true` on the Pi and
+  `"ml_listen"` in `[ha_notifier] sources`. Their messages carry
+  `"origin": "ml_listen"` and `"track"`.
 - **Payload** the Pi sends:
   `{"source", "source_byte", "provider", "display", "state", "title", "artist", "album", "cover_url"}`,
   `state` = `playing` / `paused` / `idle`.

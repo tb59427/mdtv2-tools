@@ -65,6 +65,23 @@ here is Philip's work, unchanged.
   `providers/phono_recognize.py`. Optional test snippets via `tap_dir`
   (meant for a tmpfs).
 
+### Music recognition on the bus
+
+- Optional (`[ml_listen] enabled = true`, `core/ml_listen.py`): the HAT's ADC
+  hears the MasterLink audio lines (PCM1862 VIN1/VIN2, measured). While the
+  audio master plays a source the bridge doesn't provide (CD, A.MEM, ...),
+  the bridge records from VIN1 and identifies the music with the same
+  recognizer; results go to `state:nowplaying` / `link:ml:nowplaying` keyed
+  by the bus source, with `"origin": "ml_listen"` and the track number. A
+  new track number from the audio master starts a new recognition.
+- The ADC is shared with the turntable, which has priority
+  (`core/adc.py`); the turntable provider claims it before its loopback.
+- `audio_tap.py`: `--channel` for the result channel, `SIGUSR1` = new track.
+- ha-notifier: `"ml_listen"` in `sources` forwards all of them. HA:
+  `sensor.mdt_ml_listen` in `mdt_webhook.yaml`; the button-card shows bus
+  sources too (`bus_image`). Web UI: switch and source filter on the
+  Turntable tab. `install.sh` sets up the shazamio venv for it as well.
+
 ### Home Assistant
 
 - **ha-notifier** (`ha-notifier/`, new service): forwards now-playing

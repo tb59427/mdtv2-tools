@@ -128,6 +128,49 @@ first, then re-run `install.sh`. The ha-notifier forwards only the sources
 in `[ha_notifier] sources` -- the turntable's source isn't in the shipped
 HA setup.
 
+#### Music recognition on the bus (`ml_listen`)
+
+The HAT's ADC (PCM1862) doesn't only have the phono input: VIN1 and VIN2
+carry the MasterLink audio lines. Measured with a BeoSound 3200 as audio
+master, both at about -30 dBFS (RMS) for a CD as for N.MUSIC; the DataLink
+(VIN3) and phono (VIN4) inputs stay silent then. So the bridge can listen
+to what the bus plays and identify it, also for sources it doesn't provide:
+
+```toml
+[ml_listen]
+enabled = true
+# sources = ["CD", "A.MEM"]   # display names or source bytes; omit = all
+```
+
+How it works (`core/ml_listen.py`):
+
+* It follows the state tracker (`link:ml:state`). While the audio master
+  reports Playing a source that isn't one of this bridge's own (those know
+  what they play) -- and, if `sources` is set, is in that list -- it
+  records from the ADC: `arecord | audio_tap.py --recognize`, nothing goes
+  back to the DAC.
+* Same recognizer as the turntable: ~10 s snippets, a result counts once
+  two attempts agree, new track on a silent gap. On a CD the audio master's
+  track number also starts a new track (`SIGUSR1` to the tap).
+* Results go out like a source of our own: `state:nowplaying` /
+  `link:ml:nowplaying`, keyed by the bus source's byte, every message with
+  `"origin": "ml_listen"` and the track number in `"track"`. ha-notifier
+  forwards them when `[ha_notifier] sources` contains `"ml_listen"` (or the
+  source's name); HA shows them via `sensor.mdt_ml_listen`.
+* **ADC sharing** (`core/adc.py`): only one process can record. The
+  turntable has priority -- when it starts its loopback, the listener stops
+  first and resumes afterwards. Each sets the ADC input mux to its own input
+  on start (`adc_input_reg`, default `0x41` = VIN1).
+
+Tested on a BeoSound 3200 with a CD: recognized ~30 s after a track change
+(two attempts), sent on to HA with cover. Known limits:
+
+* Shazam often names a compilation instead of the original album (here
+  "Peaceful Choral Music" for a track from "Officium").
+* The listener only hears what the audio master puts on the ML audio lines.
+* Same shazamio caveats as above; the venv is installed when
+  `[ml_listen] enabled = true`, so re-run `install.sh` after enabling.
+
 ## Auto-wake
 
 When a provider's stream starts, the SC injects a virtual Beo4 keypress so

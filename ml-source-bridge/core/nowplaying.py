@@ -88,6 +88,12 @@ def _write(r: redis.StrictRedis, src: int, blob: dict[str, str]) -> None:
     r.publish(NOWPLAYING_CHAN, s)
 
 
+def write(r: redis.StrictRedis, src: int, blob: dict[str, str]) -> None:
+    """Publish a view for a source no provider of ours owns (the bus
+    listener's recognitions). Raises redis errors to the caller."""
+    _write(r, src, blob)
+
+
 def reset(r: redis.StrictRedis) -> None:
     """Drop the previous run's view (sources may have been removed from
     the config since)."""

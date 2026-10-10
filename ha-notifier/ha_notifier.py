@@ -27,6 +27,9 @@ Behaviour:
     local file (shairport-sync's cover cache) is served over HTTP on
     `cover_port` and sent to HA as `cover_url`; an http(s) URL is passed
     through. Only files the bridge has reported are served.
+  * Sources: `sources` lists display names or source bytes to forward
+    (none = all). "ml_listen" stands for every source the bus listener
+    reports (music recognition on CD, A.MEM, ...; "origin": "ml_listen").
 
 Config: [ha_notifier] in /etc/ml-source-bridge.toml (see
 ml-source-bridge/config.toml.example). While disabled it idles, waiting
@@ -213,7 +216,9 @@ class Notifier:
         if self.cfg.sources is None:
             return True
         return (str(blob.get("source", "")).lower() in self.cfg.sources
-                or str(blob.get("source_byte", "")).lower() in self.cfg.sources)
+                or str(blob.get("source_byte", "")).lower() in self.cfg.sources
+                # "ml_listen" in sources: every source the bus listener reports
+                or (blob.get("origin") == "ml_listen" and "ml_listen" in self.cfg.sources))
 
     def offer(self, raw: str, *, now: float, immediate: bool = False) -> None:
         """A new payload from redis. Schedules it for sending."""

@@ -5,7 +5,8 @@ show_icon: false
 show_state: false
 tap_action:
   action: more-info
-# One card for the whole system: shows the turntable while it plays,
+# One card for the whole system: shows the turntable while it plays, then
+# another bus source the Pi recognizes (CD, A.MEM, ... -- [ml_listen]),
 # otherwise N.MUSIC (MA or a stream straight to the Pi, e.g. AirPlay).
 visibility:
   - condition: or
@@ -16,6 +17,9 @@ visibility:
       - condition: state
         entity: sensor.mdt_phono
         state: playing
+      - condition: state
+        entity: sensor.mdt_ml_listen
+        state: playing
 variables:
   # --- settings ---
   # Background for the turntable while no track is recognized. A photo of
@@ -24,6 +28,9 @@ variables:
   phono_image: /local/mdt/turntable.svg
   # Label of the turntable source in the header (its display_name).
   phono_label: BG7000
+  # Background for a bus source (CD, ...) until its track is recognized;
+  # empty = theme colour.
+  bus_image: ''
   # --- derived ---
   # phono: the turntable is the active source (sensor.mdt_phono playing).
   phono: >
@@ -34,6 +41,15 @@ variables:
     [[[
       const p = states['sensor.mdt_phono'];
       return p?.state === 'playing' && !!p?.attributes?.artist;
+    ]]]
+  # bus: another bus source plays and the Pi listens along (sensor.mdt_ml_listen).
+  bus: >
+    [[[ return !variables.phono && states['sensor.mdt_ml_listen']?.state === 'playing'; ]]]
+  # bus_known: ... and music recognition has identified the track.
+  bus_known: >
+    [[[
+      const b = states['sensor.mdt_ml_listen'];
+      return variables.bus && !!b?.attributes?.artist;
     ]]]
   # ext: N.MUSIC plays something other than Sendspin/MA (per the Pi).
   # Title/artist/cover then come from the Pi.
@@ -50,6 +66,11 @@ custom_fields:
         const album = states['sensor.mdt_phono'].attributes.album || '';
         return variables.phono_label + (variables.phono_known && album ? ` · ${album}` : '');
       }
+      if (variables.bus) {
+        const a = states['sensor.mdt_ml_listen'].attributes;
+        return [a.source, a.track ? `Titel ${a.track}` : '', variables.bus_known ? a.album : '']
+          .filter(Boolean).join(' · ');
+      }
       const q = states['sensor.n_music_quelle']?.state || '';
       const i = states['sensor.n_music_inhalt']?.state || '';
       return 'N.MUSIC · ' + ((i && i !== '–') ? `${q} · ${i}` : q);
@@ -60,6 +81,10 @@ custom_fields:
         return variables.phono_known
           ? states['sensor.mdt_phono'].attributes.title || ''
           : 'Schallplatte';
+      if (variables.bus)
+        return variables.bus_known
+          ? states['sensor.mdt_ml_listen'].attributes.title || ''
+          : states['sensor.mdt_ml_listen'].attributes.source || '';
       return variables.ext
         ? states['sensor.mdt_n_music'].attributes.title || ''
         : entity.attributes.media_title || '';
@@ -70,6 +95,8 @@ custom_fields:
         return variables.phono_known
           ? states['sensor.mdt_phono'].attributes.artist || ''
           : '';
+      if (variables.bus)
+        return variables.bus_known ? states['sensor.mdt_ml_listen'].attributes.artist || '' : '';
       return variables.ext
         ? states['sensor.mdt_n_music'].attributes.artist || ''
         : entity.attributes.media_artist || '';
@@ -147,10 +174,14 @@ styles:
     - background: >
         [[[
           // Turntable: recognized cover, else the default image.
+          // Bus source (CD, ...): recognized cover, else bus_image.
           // N.MUSIC: cover from MA or -- for AirPlay & co. -- from the Pi.
           const pic = variables.phono
             ? (variables.phono_known && states['sensor.mdt_phono'].attributes.cover_url)
                 || variables.phono_image
+            : variables.bus
+              ? (variables.bus_known && states['sensor.mdt_ml_listen'].attributes.cover_url)
+                  || variables.bus_image
             : variables.ext
               ? states['sensor.mdt_n_music'].attributes.cover_url
               : entity.attributes.entity_picture;
@@ -182,8 +213,8 @@ styles:
       - opacity: 0.85
       - margin-bottom: 8px
     prev:
-      - display: "[[[ return variables.ext || variables.phono ? 'none' : 'block'; ]]]"
+      - display: "[[[ return variables.ext || variables.phono || variables.bus ? 'none' : 'block'; ]]]"
     play:
-      - display: "[[[ return variables.ext || variables.phono ? 'none' : 'block'; ]]]"
+      - display: "[[[ return variables.ext || variables.phono || variables.bus ? 'none' : 'block'; ]]]"
     next:
-      - display: "[[[ return variables.ext || variables.phono ? 'none' : 'block'; ]]]"
+      - display: "[[[ return variables.ext || variables.phono || variables.bus ? 'none' : 'block'; ]]]"

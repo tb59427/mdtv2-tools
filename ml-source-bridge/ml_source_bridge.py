@@ -55,7 +55,7 @@ from core.bus import Bus, Periodic, detect_firmware_role, log
 from core.dispatcher import Context, Dispatcher
 from core import builders as B
 from core import logging_setup
-from core import nowplaying
+from core import adc, ml_listen, nowplaying
 from core.light_handler import LightHandler
 from core.telegram import (
     SRC_CD, SRC_N_MUSIC, SRC_N_RADIO, SRC_RADIO, TT_REQUEST,
@@ -420,6 +420,9 @@ def check_config(cfg: dict, args) -> list[str]:
         attempt(f"source 0x{src:02x}", lambda e=entry, d=display: make_provider(
             e.get("provider", "airplay"), e["source_byte"], d, cfg=cfg,
             provider_default=e.get("provider_default")))
+    listen = cfg.get("ml_listen") or {}
+    if listen.get("enabled", False):
+        attempt("ml_listen", lambda: ml_listen.validate(listen))
     light = cfg.get("light_handler") or {}
     if light.get("enabled", False):
         attempt("light_handler", lambda: LightHandler(
@@ -668,6 +671,18 @@ def main() -> int:
     for prov in providers.values():
         prov.start()
 
+    # Music recognition on sources the bus carries but we don't provide
+    # (CD, A.MEM, ...) -- see core/ml_listen.py. Shares the ADC with the
+    # turntable, which has priority.
+    listener: Optional[ml_listen.BusListener] = None
+    listen_cfg = cfg.get("ml_listen") or {}
+    if listen_cfg.get("enabled", False):
+        listener = ml_listen.BusListener(
+            cfg=listen_cfg, own_sources=set(providers),
+            redis_host=redis_host, redis_port=redis_port)
+        adc.register_listener(listener)
+        listener.start()
+
     # Role boot announce -- emit any "I exist on the bus" telegrams the
     # real B&O device with this role would send at power-up (see captured
     # ml-startup.txt for the SC sequence). Without this, other devices
@@ -719,6 +734,11 @@ def main() -> int:
                 bus.send(B.release(frm=role.own_address))
             except Exception:
                 pass
+        if listener is not None:
+            try:
+                listener.stop()
+            except Exception as e:
+                log(f"[main] error stopping the bus listener: {e}", err=True)
         for prov in providers.values():
             try:
                 prov.stop()
