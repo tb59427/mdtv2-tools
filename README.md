@@ -103,6 +103,10 @@ the broker.
 
 ## Quick start
 
+New here? [Getting started](docs/getting-started.md) puts the pieces
+together: this Pi, BeoControl with a BeoLink PC2, the BeoBar menu bar app
+and Home Assistant.
+
 On a fresh Raspberry Pi OS Lite (Bookworm or later), one line:
 
 ```sh
