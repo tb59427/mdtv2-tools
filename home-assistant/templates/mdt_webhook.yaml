@@ -63,26 +63,26 @@ template:
         # On idle only from the source it shows, so a source that stopped
         # earlier can't clear one that's playing now.
         state: >-
-          {% set mine = trigger.json.origin | default('') == 'ml_listen' %}
+          {%- set mine = trigger.json.origin | default('') == 'ml_listen' -%}
           {% if mine and (trigger.json.state == 'playing' or trigger.json.source == this.attributes.get('source', '')) %}{{ trigger.json.state | default('idle') }}
           {%- elif this.state in ['unknown', 'unavailable'] %}idle
           {%- else %}{{ this.state }}{% endif %}
         attributes:
           source: >-
-            {% set mine = trigger.json.origin | default('') == 'ml_listen' %}
+            {%- set mine = trigger.json.origin | default('') == 'ml_listen' -%}
             {{ trigger.json.source if mine and trigger.json.state == 'playing' else this.attributes.get('source', '') }}
           track: >-
-            {% set mine = trigger.json.origin | default('') == 'ml_listen' and (trigger.json.state == 'playing' or trigger.json.source == this.attributes.get('source', '')) %}
+            {%- set mine = trigger.json.origin | default('') == 'ml_listen' and (trigger.json.state == 'playing' or trigger.json.source == this.attributes.get('source', '')) -%}
             {{ trigger.json.track | default('') if mine else this.attributes.get('track', '') }}
           title: >-
-            {% set mine = trigger.json.origin | default('') == 'ml_listen' and (trigger.json.state == 'playing' or trigger.json.source == this.attributes.get('source', '')) %}
+            {%- set mine = trigger.json.origin | default('') == 'ml_listen' and (trigger.json.state == 'playing' or trigger.json.source == this.attributes.get('source', '')) -%}
             {{ trigger.json.title | default('') if mine else this.attributes.get('title', '') }}
           artist: >-
-            {% set mine = trigger.json.origin | default('') == 'ml_listen' and (trigger.json.state == 'playing' or trigger.json.source == this.attributes.get('source', '')) %}
+            {%- set mine = trigger.json.origin | default('') == 'ml_listen' and (trigger.json.state == 'playing' or trigger.json.source == this.attributes.get('source', '')) -%}
             {{ trigger.json.artist | default('') if mine else this.attributes.get('artist', '') }}
           album: >-
-            {% set mine = trigger.json.origin | default('') == 'ml_listen' and (trigger.json.state == 'playing' or trigger.json.source == this.attributes.get('source', '')) %}
+            {%- set mine = trigger.json.origin | default('') == 'ml_listen' and (trigger.json.state == 'playing' or trigger.json.source == this.attributes.get('source', '')) -%}
             {{ trigger.json.album | default('') if mine else this.attributes.get('album', '') }}
           cover_url: >-
-            {% set mine = trigger.json.origin | default('') == 'ml_listen' and (trigger.json.state == 'playing' or trigger.json.source == this.attributes.get('source', '')) %}
+            {%- set mine = trigger.json.origin | default('') == 'ml_listen' and (trigger.json.state == 'playing' or trigger.json.source == this.attributes.get('source', '')) -%}
             {{ trigger.json.cover_url | default('') if mine else this.attributes.get('cover_url', '') }}
