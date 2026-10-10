@@ -77,6 +77,11 @@ here is Philip's work, unchanged.
 - The ADC is shared with the turntable, which has priority
   (`core/adc.py`); the turntable provider claims it before its loopback.
 - `audio_tap.py`: `--channel` for the result channel, `SIGUSR1` = new track.
+- Original album from MusicBrainz (`core/musicbrainz.py`, `album_lookup`):
+  Shazam often names a compilation; the listener looks up the release that
+  is a plain Album, preferring the one with the track at the CD's track
+  number, and takes its Cover Art Archive cover. `phono_recognize.describe`
+  passes Shazam's ISRC on.
 - ha-notifier: `"ml_listen"` in `sources` forwards all of them. HA:
   `sensor.mdt_ml_listen` in `mdt_webhook.yaml`; the button-card shows bus
   sources too (`bus_image`). Web UI: switch and source filter on the

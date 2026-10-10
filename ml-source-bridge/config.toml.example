@@ -290,6 +290,10 @@ display_name = "N.RADIO"        # optional; up to 11 chars ASCII
 # recognize_silence_db = -50.0   # quieter than this = gap between tracks;
 #                                # on CD the audio master's track number also
 #                                # starts a new track
+# album_lookup  = true           # Shazam often names a compilation: look up the
+#                                # original album (and cover) on MusicBrainz;
+#                                # prefers the release with the track at the
+#                                # audio master's track number
 # adc_input_reg = 0x41           # PCM1862 input mux: 0x41 = VIN1 (ML audio);
 #                                # VIN2 (0x42) carries the same
 # pga_db        = 0.0            # ML audio is line level

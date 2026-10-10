@@ -62,7 +62,7 @@ def clean_album(album: str) -> str:
 
 
 def describe(result: dict) -> Optional[dict]:
-    """shazamio response -> {title, artist, album, cover_url}, or None."""
+    """shazamio response -> {title, artist, album, cover_url, isrc}, or None."""
     t = result.get("track")
     if not t or not t.get("title"):
         return None
@@ -76,6 +76,7 @@ def describe(result: dict) -> Optional[dict]:
         "artist": t.get("subtitle", ""),
         "album": clean_album(album),
         "cover_url": (t.get("images") or {}).get("coverart", ""),
+        "isrc": t.get("isrc", "") or "",
     }
 
 

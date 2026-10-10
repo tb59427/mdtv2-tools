@@ -151,22 +151,34 @@ How it works (`core/ml_listen.py`):
   back to the DAC.
 * Same recognizer as the turntable: ~10 s snippets, a result counts once
   two attempts agree, new track on a silent gap. On a CD the audio master's
-  track number also starts a new track (`SIGUSR1` to the tap).
+  track number also starts a new track (`SIGUSR1` to the tap), and a
+  recognized title stays until that number changes -- the recognizer alone
+  would clear it after two misses, which quiet passages cause.
 * Results go out like a source of our own: `state:nowplaying` /
   `link:ml:nowplaying`, keyed by the bus source's byte, every message with
   `"origin": "ml_listen"` and the track number in `"track"`. ha-notifier
   forwards them when `[ha_notifier] sources` contains `"ml_listen"` (or the
   source's name); HA shows them via `sensor.mdt_ml_listen`.
+* **Original album** (`core/musicbrainz.py`, `album_lookup = true` by
+  default): Shazam often names a compilation instead of the album a track
+  comes from. After each recognition the listener looks the recording up on
+  MusicBrainz -- by ISRC if Shazam reports one, else by title and first
+  artist -- and takes the release that is an Album without secondary type
+  (no Compilation, Live, ...), preferring the one with the track at the
+  audio master's track number, else the earliest. The cover then comes from
+  the Cover Art Archive, if it has one. No match or no network: Shazam's
+  album stays.
 * **ADC sharing** (`core/adc.py`): only one process can record. The
   turntable has priority -- when it starts its loopback, the listener stops
   first and resumes afterwards. Each sets the ADC input mux to its own input
   on start (`adc_input_reg`, default `0x41` = VIN1).
 
 Tested on a BeoSound 3200 with a CD: recognized ~30 s after a track change
-(two attempts), sent on to HA with cover. Known limits:
+(two attempts), sent on to HA with cover; Shazam's "Peaceful Choral Music"
+corrected to "Officium" via MusicBrainz. Known limits:
 
-* Shazam often names a compilation instead of the original album (here
-  "Peaceful Choral Music" for a track from "Officium").
+* The album lookup depends on MusicBrainz's data; obscure releases may not
+  be there (then Shazam's album stays).
 * The listener only hears what the audio master puts on the ML audio lines.
 * Same shazamio caveats as above; the venv is installed when
   `[ml_listen] enabled = true`, so re-run `install.sh` after enabling.

@@ -47,7 +47,7 @@ from typing import Optional
 
 import redis
 
-from core import adc, nowplaying
+from core import adc, musicbrainz, nowplaying
 from core.bus import log
 
 STATE_CHAN = "link:ml:state"
@@ -97,6 +97,8 @@ class BusListener:
         self._adc_setup = bool(cfg.get("adc_setup", True))
         self._adc_input = int(cfg.get("adc_input_reg", _ADC_IN_ML))
         self._pga_db = float(cfg.get("pga_db", 0.0))
+        # Shazam often names a compilation; look up the original album.
+        self._album_lookup = bool(cfg.get("album_lookup", True))
         self._i2c_bus = int(cfg.get("i2c_bus", 1))
         self._i2c_addr = str(cfg.get("i2c_addr", "0x4a"))
         self._i2cset = str(cfg.get("i2cset_path") or shutil.which("i2cset")
@@ -354,12 +356,44 @@ class BusListener:
             if self._rec is None:
                 return                          # stale: we stopped meanwhile
             if msg.get("state") == "confirmed":
-                self._recognized = {k: str(msg.get(k) or "") for k in
-                                    ("title", "artist", "album", "cover_url")}
+                info = {k: str(msg.get(k) or "") for k in
+                        ("title", "artist", "album", "cover_url")}
+                cur = self._recognized or {}
+                if (info["artist"], info["title"]) == (cur.get("artist"), cur.get("title")):
+                    return                      # re-confirmed (keeps a looked-up album)
+                self._recognized = info
+                if self._album_lookup:
+                    threading.Thread(target=self._lookup_album, name="ml-listen-mb",
+                                     args=(dict(info), str(msg.get("isrc") or ""), self._track),
+                                     daemon=True).start()
             elif self._recognized is None:
                 return                          # "cleared" with nothing shown
+            elif self._track is not None:
+                # The recognizer clears after two misses (quiet passages in
+                # long tracks). With a track number from the audio master we
+                # know better: same number, same track -- keep it until the
+                # number changes (_evaluate clears it then).
+                return
             else:
                 self._recognized = None
+            self._publish()
+
+    def _lookup_album(self, info: dict, isrc: str, track: Optional[int]) -> None:
+        """Thread: replace Shazam's album (often a compilation) with the
+        original from MusicBrainz, if found, and its cover if it has one."""
+        found = musicbrainz.original_album(info["title"], info["artist"],
+                                           isrc=isrc, track=track)
+        if not found or not found["album"]:
+            return
+        with self._lock:
+            cur = self._recognized
+            if not cur or (cur["artist"], cur["title"]) != (info["artist"], info["title"]):
+                return                          # the track changed meanwhile
+            if found["album"] != cur["album"]:
+                log(f"[listen] album: {cur['album'] or '?'} -> {found['album']} (MusicBrainz)")
+            cur["album"] = found["album"]
+            if found["cover_url"]:
+                cur["cover_url"] = found["cover_url"]
             self._publish()
 
     # ---- thread ----------------------------------------------------------------
