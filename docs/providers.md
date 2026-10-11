@@ -170,6 +170,30 @@ redis-cli HGET state:nowplaying 0x7a
 entry mean it works. `no MPRIS name matching …` at startup is normal while
 nothing streams -- sendspin only registers MPRIS during a session.
 
+### Troubleshooting: N.MUSIC shows nothing playing, `dbus-send ... timed out`
+
+Seen with sendspin 7.5.0 against Music Assistant 2.10 (October 2026): MA
+advertises the controller commands `seek` / `seek_relative`, which the
+aiosendspin 6.0.x that sendspin 7.5.0 pins doesn't know. The daemon logs
+`InvalidFieldValue: Field "supported_commands"` for every such message, and
+its MPRIS interface can stop answering: audio may keep playing, but the
+bridge reports N.MUSIC idle (web UI, panel texts, auto-wake, Beo4 pause).
+Upstream: [sendspin#278](https://github.com/Sendspin-Protocol/sendspin/issues/278),
+[#280](https://github.com/Sendspin-Protocol/sendspin/issues/280).
+
+Fix until a sendspin release relaxes the pin -- aiosendspin 6.1.1 is
+compatible and knows the new commands:
+
+```sh
+cd /tmp
+sudo -u sendspin -H /home/sendspin/.local/bin/uv pip install --no-config \
+  --python /home/sendspin/.local/share/uv/tools/sendspin/bin/python "aiosendspin[server]==6.1.1"
+sudo systemctl restart sendspin
+```
+
+`uv tool upgrade sendspin` puts 6.0.x back as long as sendspin pins it --
+repeat the fix after an upgrade.
+
 ## MPD
 
 MPD plays its own library, playlists and web radio; the bridge controls it
