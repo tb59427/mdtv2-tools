@@ -48,7 +48,9 @@ def _first_artist(artist: str) -> str:
                     maxsplit=1, flags=re.IGNORECASE)[0].strip()
 
 
-def query_for(title: str, artist: str, isrc: str = "") -> str:
+def query_for(title: str, artist: str, isrc: str = "", recording_mbid: str = "") -> str:
+    if recording_mbid:                                  # exact, from AcoustID
+        return f"rid:{_lucene(recording_mbid)}"
     if isrc:
         return f"isrc:{_lucene(isrc)}"
     q = f'recording:"{_lucene(title)}"'
@@ -78,7 +80,7 @@ def pick_release(recordings: list[dict], track: Optional[int]) -> Optional[dict]
             if best_key is None or key < best_key:
                 best_key = key
                 best = {"album": rel.get("title", ""), "release_group": rg.get("id", ""),
-                        "date": rel.get("date", "")}
+                        "date": rel.get("date", ""), "release_id": rel.get("id", "")}
     return best
 
 
@@ -95,13 +97,13 @@ def cover_url(release_group: str, timeout: float = 5.0) -> str:
         return ""
 
 
-def original_album(title: str, artist: str, *, isrc: str = "",
+def original_album(title: str, artist: str, *, isrc: str = "", recording_mbid: str = "",
                    track: Optional[int] = None, timeout: float = 5.0) -> Optional[dict]:
-    """{"album", "cover_url", "date"} for the original album, or None (no
-    match, network error). Never raises."""
+    """{"album", "cover_url", "date", "release_id"} for the original album, or
+    None (no match, network error). Never raises."""
     try:
         url = _API + "?" + urllib.parse.urlencode(
-            {"query": query_for(title, artist, isrc), "fmt": "json", "limit": 10})
+            {"query": query_for(title, artist, isrc, recording_mbid), "fmt": "json", "limit": 10})
         data = _get(url, timeout)
         rel = pick_release(data.get("recordings") or [], track)
         if rel is None and isrc:                        # ISRC unknown to MusicBrainz
@@ -110,7 +112,33 @@ def original_album(title: str, artist: str, *, isrc: str = "",
             rel = pick_release(_get(url, timeout).get("recordings") or [], track)
         if rel is None:
             return None
-        return {"album": rel["album"], "date": rel["date"],
+        return {"album": rel["album"], "date": rel["date"], "release_id": rel["release_id"],
                 "cover_url": cover_url(rel["release_group"], timeout)}
     except (urllib.error.URLError, OSError, ValueError, KeyError):
         return None
+
+
+def tracklist(release_id: str, timeout: float = 5.0) -> dict[int, dict]:
+    """Track number -> {"title", "artist"} for a single-disc release (the CD
+    in the player); {} on multi-disc releases, errors or no network."""
+    if not release_id:
+        return {}
+    try:
+        data = _get(f"https://musicbrainz.org/ws/2/release/{release_id}"
+                    "?inc=recordings+artist-credits&fmt=json", timeout)
+        media = data.get("media") or []
+        if len(media) != 1:
+            return {}                                   # which disc? don't guess
+        out: dict[int, dict] = {}
+        for t in media[0].get("tracks") or []:
+            try:
+                num = int(t.get("number", ""))
+            except ValueError:
+                continue                                # vinyl-style "A1"
+            credit = t.get("artist-credit") or data.get("artist-credit") or []
+            artist = "".join(a.get("name", "") + (a.get("joinphrase") or "")
+                             for a in credit).strip()
+            out[num] = {"title": t.get("title", ""), "artist": artist}
+        return out
+    except (urllib.error.URLError, OSError, ValueError, KeyError):
+        return {}

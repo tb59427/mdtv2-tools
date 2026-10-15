@@ -174,6 +174,21 @@ How it works (`core/ml_listen.py`):
   the Cover Art Archive, if it has one. A new recognition is held back for
   up to 6 s for this, so HA doesn't first show the compilation. No match or
   no network: Shazam's album stays.
+* **AcoustID fallback** (`providers/acoustid_lookup.py`, `acoustid_key`):
+  Shazam's web API doesn't know everything the Shazam app knows (a 1994
+  blues-rock CD: no match in any 10-30 s window, while the iPhone app found
+  it). With a key from acoustid.org, the tap keeps each track's first ~2
+  minutes in memory; after two Shazam misses `fpcalc` fingerprints them and
+  AcoustID -- MusicBrainz's fingerprint database -- is asked. A lookup needs
+  the track's total length to within about +-7 s (measured), which nobody
+  knows while it plays, so durations are scanned in 14 s steps, likely
+  lengths first (at most ~45 requests, ~15 s, once per unknown track). The
+  hit goes through the MusicBrainz lookup by its recording ID.
+* **CD track list:** once a CD track is identified (Shazam or AcoustID) and
+  MusicBrainz confirms it at that track number, the album's track list
+  names every following track at its start -- no recognition needed. A
+  recognition that disagrees (another CD) drops it, and so does the source
+  stopping. Single-disc releases only.
 * **ADC sharing** (`core/adc.py`): only one process can record. The
   turntable has priority -- when it starts its loopback, the listener stops
   first and resumes afterwards. Each sets the ADC input mux to its own input

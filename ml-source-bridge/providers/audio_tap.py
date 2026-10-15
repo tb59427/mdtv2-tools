@@ -89,6 +89,31 @@ class Ring:
         return data[len(data) - want:]
 
 
+class Head:
+    """The first `seconds` of the current track (16-bit mono), for AcoustID,
+    which fingerprints a track from its start. Reset on every new track;
+    ~11.5 MB at 48 kHz, in memory only."""
+
+    def __init__(self, rate: int, seconds: float) -> None:
+        self._want = int(rate * seconds) * 2
+        self._buf = bytearray()
+        self._lock = threading.Lock()
+
+    def reset(self) -> None:
+        with self._lock:
+            self._buf = bytearray()
+
+    def add(self, pcm: bytes) -> None:
+        with self._lock:
+            if len(self._buf) < self._want:
+                self._buf += pcm[:self._want - len(self._buf)]
+
+    def get(self) -> bytes:
+        """The head once complete, else b"" (track still too young)."""
+        with self._lock:
+            return bytes(self._buf) if len(self._buf) >= self._want else b""
+
+
 class GapDetector:
     """Calls `on_track` when music resumes after >= min_gap_s below
     silence_db (between tracks, or a record change). Works on 100 ms
@@ -160,23 +185,45 @@ def run_worker(fd: int, args: argparse.Namespace) -> None:
     ring = Ring(args.rate, max(args.snippet_s, args.recognize_s) + 2)
 
     recognizer = None
+    head = None
     if args.recognize:
         try:
             import phono_recognize as pr
+            acoustid = None
+            if args.acoustid_key:
+                import acoustid_lookup
+                head = Head(args.rate, acoustid_lookup.HEAD_S + 2)
+                acoustid = lambda pcm: acoustid_lookup.identify(  # noqa: E731
+                    pcm, args.rate, args.acoustid_key, log)
             recognizer = pr.Recognizer(
                 rate=args.rate, snapshot=ring.snapshot,
                 publish=pr.redis_publisher(args.redis_host, args.redis_port, log,
                                            channel=args.channel or pr.RECOGNIZED_CHAN),
-                log=log, snippet_s=args.recognize_s)
+                log=log, snippet_s=args.recognize_s,
+                head=head.get if head else None, acoustid=acoustid,
+                head_s=acoustid_lookup.HEAD_S + 2 if head else 122.0)
             threading.Thread(target=recognizer.run, name="recognize",
                              daemon=True).start()
-            log(f"music recognition on ({args.recognize_s:g} s snippets)")
+            log(f"music recognition on ({args.recognize_s:g} s snippets"
+                + (", AcoustID fallback)" if head else ")"))
         except Exception as e:                  # shazamio missing, ...
             log(f"music recognition unavailable: {e}")
             recognizer = None
 
-    def on_track() -> None:
+    last_signal = [0.0]
+
+    def on_track(signalled: bool = False) -> None:
+        # A CD track change arrives twice: the audio master's track number
+        # (SIGUSR1) and, a moment later, the silent gap. Don't let the gap
+        # restart the head a few seconds into the track.
+        now = time.monotonic()
+        if signalled:
+            last_signal[0] = now
+        elif now - last_signal[0] < 5.0:
+            return
         log("new track")
+        if head is not None:
+            head.reset()
         if recognizer is not None:
             recognizer.new_track()
     gaps = GapDetector(args.rate, on_track, silence_db=args.silence_db)
@@ -221,10 +268,12 @@ def run_worker(fd: int, args: argparse.Namespace) -> None:
                 mono = mono / 65536.0           # keep the top 16 bits
             pcm = np.clip(mono, -32768, 32767).astype("<i2")
             ring.add(pcm.tobytes())
+            if head is not None:
+                head.add(pcm.tobytes())
             gaps.feed(pcm)
             if track_signal.is_set():
                 track_signal.clear()
-                on_track()
+                on_track(signalled=True)
     finally:
         stop.set()
         if recognizer is not None:
@@ -244,6 +293,8 @@ def main() -> int:
                     help="snippet length per recognition attempt")
     ap.add_argument("--silence-db", type=float, default=-50.0,
                     help="below this a stretch counts as a gap between tracks")
+    ap.add_argument("--acoustid-key", default="",
+                    help="AcoustID API key: fall back to AcoustID when Shazam finds nothing")
     ap.add_argument("--channel", default="",
                     help="redis channel for results (default link:phono:recognized)")
     ap.add_argument("--redis-host", default="localhost")

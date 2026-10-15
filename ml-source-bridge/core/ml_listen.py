@@ -107,6 +107,11 @@ class BusListener:
         self._pga_db = float(cfg.get("pga_db", 0.0))
         # Shazam often names a compilation; look up the original album.
         self._album_lookup = bool(cfg.get("album_lookup", True))
+        # AcoustID fallback for tracks Shazam doesn't know (acoustid.org key)
+        self._acoustid_key = str(cfg.get("acoustid_key", "")).strip()
+        # The CD in the player, once an album was identified: release and its
+        # track list, so later track numbers get their titles right away.
+        self._disc: Optional[dict] = None
         self._i2c_bus = int(cfg.get("i2c_bus", 1))
         self._i2c_addr = str(cfg.get("i2c_addr", "0x4a"))
         self._i2cset = str(cfg.get("i2cset_path") or shutil.which("i2cset")
@@ -226,6 +231,7 @@ class BusListener:
                     self._recognized = None
                     self._album_pending = False
                 self._track = track
+                self._predict_from_disc()
                 self._publish()
 
     # ---- capture -------------------------------------------------------------
@@ -264,6 +270,7 @@ class BusListener:
                  "--recognize", "--recognize-s", str(self._snippet_s),
                  "--silence-db", str(self._silence_db),
                  "--channel", LISTEN_CHAN,
+                 *(["--acoustid-key", self._acoustid_key] if self._acoustid_key else []),
                  "--redis-host", str(self._redis_host),
                  "--redis-port", str(int(self._redis_port))],
                 stdin=self._rec.stdout, stdout=subprocess.DEVNULL,
@@ -294,6 +301,7 @@ class BusListener:
         self._kill(tap)
         self._kill(rec)
         src, name = self._src, self._src_name
+        self._disc = None
         self._recognized = None
         self._album_pending = False
         self._src, self._track = None, None
@@ -400,11 +408,18 @@ class BusListener:
                 cur = self._recognized or {}
                 if (info["artist"], info["title"]) == (cur.get("artist"), cur.get("title")):
                     return                      # re-confirmed (keeps a looked-up album)
+                if cur.get("predicted"):
+                    if _norm(info["title"]) == _norm(cur["title"]):
+                        return                  # the track list was right
+                    log(f"[listen] heard {info['title']!r}, expected {cur['title']!r} "
+                        f"-- another CD? forgetting {self._disc['album'] if self._disc else 'the album'}")
+                    self._disc = None
                 self._recognized = info
                 if self._album_lookup:
                     self._album_pending = True
                     threading.Thread(target=self._lookup_album, name="ml-listen-mb",
-                                     args=(dict(info), str(msg.get("isrc") or ""), self._track),
+                                     args=(dict(info), str(msg.get("isrc") or ""), self._track,
+                                           str(msg.get("recording_mbid") or "")),
                                      daemon=True).start()
                     t = threading.Timer(_ALBUM_WAIT_S, self._album_timeout, args=(info,))
                     t.daemon = True
@@ -423,12 +438,25 @@ class BusListener:
                 self._album_pending = False
             self._publish()
 
-    def _lookup_album(self, info: dict, isrc: str, track: Optional[int]) -> None:
+    def _lookup_album(self, info: dict, isrc: str, track: Optional[int],
+                      recording_mbid: str = "") -> None:
         """Thread: replace Shazam's album (often a compilation) with the
-        original from MusicBrainz, if found, and its cover if it has one."""
-        found = musicbrainz.original_album(info["title"], info["artist"],
-                                           isrc=isrc, track=track)
+        original from MusicBrainz, if found, and its cover if it has one.
+        On a CD also fetch the album's track list (_disc)."""
+        found = musicbrainz.original_album(info["title"], info["artist"], isrc=isrc,
+                                           recording_mbid=recording_mbid, track=track)
+        tracks = {}
+        if found and found.get("release_id") and track is not None:
+            tracks = musicbrainz.tracklist(found["release_id"])
+            # Only trust it if the recognized title sits at this track number.
+            if _norm(tracks.get(track, {}).get("title", "")) != _norm(info["title"]):
+                tracks = {}
         with self._lock:
+            if tracks and self._src is not None:
+                self._disc = {"album": found["album"], "cover_url": found["cover_url"],
+                              "tracks": tracks}
+                log(f"[listen] {self._src_name}: {found['album']} -- "
+                    f"{len(tracks)} tracks, titles by track number from now on")
             cur = self._recognized
             if not cur or (cur["artist"], cur["title"]) != (info["artist"], info["title"]):
                 return                          # the track changed meanwhile
@@ -442,6 +470,19 @@ class BusListener:
             elif not was_pending:
                 return                          # nothing new to show
             self._publish()
+
+    def _predict_from_disc(self) -> None:
+        """With self._lock held, after a track change: the title from the
+        identified CD's track list, until a recognition says otherwise."""
+        if not self._disc or self._recognized is not None:
+            return
+        t = self._disc["tracks"].get(self._track)
+        if t:
+            self._recognized = {"title": t["title"], "artist": t["artist"],
+                                "album": self._disc["album"],
+                                "cover_url": self._disc["cover_url"], "predicted": True}
+            log(f"[listen] {self._src_name}: track {self._track} = {t['title']} "
+                f"({self._disc['album']})")
 
     def _album_timeout(self, info: dict) -> None:
         """MusicBrainz is slow or unreachable: show Shazam's result now; a
@@ -492,6 +533,11 @@ class BusListener:
         if ps is not None:
             try: ps.close()
             except Exception: pass
+
+
+def _norm(s: str) -> str:
+    """Title comparison: "On The Rise" == "On the Rise", "Runnin'" == "Runnin"."""
+    return "".join(c for c in s.casefold() if c.isalnum())
 
 
 def validate(cfg: dict) -> None:

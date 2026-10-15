@@ -92,6 +92,14 @@ here is Philip's work, unchanged.
 - After 20 s of silence the listener reports the source idle (and playing
   again when the music returns): the state tracker misses a stop caused by
   a source-less RELEASE.
+- AcoustID fallback (`providers/acoustid_lookup.py`, `[ml_listen]
+  acoustid_key`): for tracks Shazam's web API doesn't know, the tap keeps
+  the first ~2 minutes and identifies them via AcoustID (`fpcalc`; durations
+  scanned in 14 s steps, the lookup only matches within ~+-7 s). On a CD the
+  identified album's MusicBrainz track list then names the following tracks
+  at their start. `install.sh` installs `libchromaprint-tools`.
+- Recognizer: logs attempts without a match; drops a result that belongs to
+  the previous track.
 - ha-notifier: `"ml_listen"` in `sources` forwards all of them. HA:
   `sensor.mdt_ml_listen` in `mdt_webhook.yaml`; the button-card shows bus
   sources too (`bus_image`). Web UI: switch and source filter on the

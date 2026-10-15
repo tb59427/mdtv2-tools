@@ -93,7 +93,13 @@ def to_wav(pcm: bytes, rate: int) -> bytes:
 class Recognizer:
     """Owns the per-track policy. `snapshot(seconds)` returns the newest
     16-bit mono PCM; `publish(dict)` sends a result; `recognize(wav_bytes)`
-    returns the raw Shazam response (injectable for tests)."""
+    returns the raw Shazam response (injectable for tests).
+
+    Optional AcoustID fallback: `head()` returns the track's first `head_s`
+    seconds once complete (else b""), `acoustid(pcm)` identifies them
+    (acoustid_lookup.identify). Tried once per track, after two attempts
+    without a Shazam match; a hit is shown until the next track (Shazam's
+    re-checks would only miss again)."""
 
     def __init__(self, *, rate: int,
                  snapshot: Callable[[float], bytes],
@@ -102,6 +108,9 @@ class Recognizer:
                  log: Callable[[str], None] = print,
                  snippet_s: float = 10.0, confirm_s: float = 10.0,
                  verify_s: float = 90.0,
+                 head: Optional[Callable[[], bytes]] = None,
+                 acoustid: Optional[Callable[[bytes], Optional[dict]]] = None,
+                 head_s: float = 122.0,
                  clock: Callable[[], float] = time.monotonic) -> None:
         self.rate = rate
         self.snapshot = snapshot
@@ -112,6 +121,9 @@ class Recognizer:
         self.verify_s = verify_s
         self.clock = clock
         self._recognize = recognize
+        self._head = head
+        self._acoustid = acoustid
+        self.head_s = head_s
         self._helper: Optional[subprocess.Popen] = None
         self._clear_pending = False
         self._lock = threading.Lock()
@@ -148,6 +160,8 @@ class Recognizer:
         self._shown: Optional[dict] = None
         self._misses = 0
         self._retry = 0
+        self._ac_tried = False                 # AcoustID asked for this track
+        self._via = ""                         # "acoustid" when shown from there
 
     @staticmethod
     def _key(info: Optional[dict]):
@@ -159,7 +173,9 @@ class Recognizer:
         out = None
         with self._lock:
             key = self._key(info)
-            if info is None:
+            if info is None and self._via == "acoustid":
+                self._next_at = float("inf")    # Shazam doesn't know it; keep
+            elif info is None:
                 self._candidate = None
                 if self._shown is not None:
                     self._misses += 1
@@ -180,7 +196,7 @@ class Recognizer:
                 self._candidate = None
                 self._next_at = now + self.verify_s
             elif key == self._key(self._candidate):
-                self._shown, self._candidate = info, None
+                self._shown, self._candidate, self._via = info, None, ""
                 self._misses = self._retry = 0
                 self.log(f"[recognize] {info['artist']} - {info['title']} "
                          f"({info['album'] or '?'})")
@@ -193,9 +209,17 @@ class Recognizer:
 
     # ---- worker thread ------------------------------------------------------
 
+    def _acoustid_pending(self) -> bool:
+        """With self._lock held: AcoustID still to be tried for this track."""
+        return (self._acoustid is not None and self._head is not None
+                and not self._ac_tried and self._shown is None and self._retry >= 2)
+
     def due_in(self, now: float) -> float:
         with self._lock:
-            return self._next_at - now
+            due = self._next_at
+            if self._acoustid_pending():         # wake when the head is complete
+                due = min(due, self._track_start + self.head_s)
+            return due - now
 
     def attempt(self, now: float) -> None:
         """One recognition on the newest snippet_s seconds of this track."""
@@ -217,9 +241,31 @@ class Recognizer:
             stale = generation != self._generation
         if stale:
             return                                    # the track changed meanwhile
-        out = self.on_result(describe(result), self.clock())
+        info = describe(result)
+        out = self.on_result(info, self.clock())
         if out is not None:
             self.publish(out)
+        if info is None:
+            self._try_acoustid(generation)
+
+    def _try_acoustid(self, generation: int) -> None:
+        """Fallback once per track: identify the track's first ~2 minutes."""
+        with self._lock:
+            if not self._acoustid_pending():
+                return
+        head = self._head()
+        if not head:
+            return                                    # not 2 minutes in yet
+        with self._lock:
+            self._ac_tried = True
+        hit = self._acoustid(head)
+        with self._lock:
+            if hit is None or generation != self._generation or self._shown is not None:
+                return
+            self._shown, self._via = hit, "acoustid"
+            self._next_at = float("inf")
+        self.log(f"[recognize] {hit['artist']} - {hit['title']} (AcoustID)")
+        self.publish({"state": "confirmed", **hit, "via": "acoustid"})
 
     def _run(self, wav: bytes) -> dict:
         if self._recognize is not None:

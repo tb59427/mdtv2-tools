@@ -108,6 +108,7 @@ APT_PKGS=(
     python3-venv          # for the hidden pymcuprog venv
     alsa-utils            # arecord/aplay: dl-scripts captures + turntable loopback
     i2c-tools             # i2cset: PCM1862 ADC input mux + PGA gain
+    libchromaprint-tools  # fpcalc: AcoustID fallback of the bus recognition ([ml_listen])
     python3-numpy         # software RIAA (turntable provider + phono capture)
     python3-scipy         # ~72 MB, but RIAA is unusable without it
     python3-soundfile     # dl-scripts phono capture reads/writes WAV
