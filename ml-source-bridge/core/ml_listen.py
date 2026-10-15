@@ -255,10 +255,19 @@ class BusListener:
                 if self._track is not None:
                     log(f"[listen] {name}: track {self._track} -> {track}")
                     self._signal_new_track()
-                    self._recognized = None
+                    prev, self._recognized = self._recognized, None
                     self._album_pending = False
+                else:
+                    prev = None
                 self._track = track
                 self._predict_from_disc()
+                if self._recognized is None and prev and prev.get("album"):
+                    # Same CD as a rule: keep album, artist and cover until the new
+                    # title is recognized -- displays keep the cover instead of
+                    # dropping it for half a minute (and reloading it after).
+                    self._recognized = {"title": "", "artist": prev["artist"],
+                                        "album": prev["album"],
+                                        "cover_url": prev["cover_url"], "placeholder": True}
                 self._publish()
 
     # ---- capture -------------------------------------------------------------

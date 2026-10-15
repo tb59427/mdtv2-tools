@@ -159,6 +159,10 @@ How it works (`core/ml_listen.py`):
   `"origin": "ml_listen"` and the track number in `"track"`. ha-notifier
   forwards them when `[ha_notifier] sources` contains `"ml_listen"` (or the
   source's name); HA shows them via `sensor.mdt_ml_listen`.
+* **Track change:** album, artist and cover stay until the new title is
+  recognized (title empty meanwhile) -- a CD rarely changes between tracks,
+  and displays keep the cover instead of dropping and reloading it. Another
+  CD's recognition replaces them.
 * **Silence = idle:** the state tracker can miss a stop -- a source-less
   RELEASE (e.g. from a bridge shutting down) stops the audio master's
   source without it being reported. So after 20 s of silence (the tap's gap
