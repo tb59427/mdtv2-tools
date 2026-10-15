@@ -166,8 +166,12 @@ class Recognizer:
                         out = {"state": "cleared"}
                     self._next_at = now + self.confirm_s
                 else:
-                    self._next_at = now + _RETRY_S[min(self._retry, len(_RETRY_S) - 1)]
+                    delay = _RETRY_S[min(self._retry, len(_RETRY_S) - 1)]
+                    self._next_at = now + delay
                     self._retry += 1
+                    # Say so: otherwise an unknown record looks like recognition not running.
+                    self.log(f"[recognize] no match (attempt {self._retry}) -- "
+                             f"next in {delay:.0f} s")
             elif self._shown is not None and key == self._key(self._shown):
                 self._misses = 0
                 self._candidate = None
