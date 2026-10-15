@@ -25,8 +25,12 @@ Behaviour:
   * On startup the current state (from state:nowplaying) is sent once.
   * Cover art: the bridge reports `art_url` as the backend gives it. A
     local file (shairport-sync's cover cache) is served over HTTP on
-    `cover_port` and sent to HA as `cover_url`; an http(s) URL is passed
-    through. Only files the bridge has reported are served.
+    `cover_port` and sent to HA as `cover_url`. An http(s) URL (Shazam,
+    Cover Art Archive) is fetched once and served the same way, scaled to
+    `cover_size` px as a baseline JPEG (`cover_proxy`, needs Pillow) -- small
+    displays then load plain HTTP from the LAN instead of HTTPS with
+    redirects; without Pillow, or if the fetch fails, it's passed through.
+    Only files the bridge has reported are served.
   * Sources: `sources` lists display names or source bytes to forward
     (none = all). "ml_listen" stands for every source the bus listener
     reports (music recognition on CD, A.MEM, ...; "origin": "ml_listen").
@@ -59,6 +63,11 @@ from typing import Optional
 
 import redis
 
+try:                                    # cover scaling for the proxy (python3-pil)
+    from PIL import Image
+except ImportError:                     # pragma: no cover
+    Image = None
+
 NOWPLAYING_KEY  = "state:nowplaying"
 NOWPLAYING_CHAN = "link:ml:nowplaying"
 CTL_RESTART     = "link:ctl:restart"
@@ -84,6 +93,8 @@ class Config:
     sources: Optional[set[str]] = None  # display names / "0x7a"; None = all
     cover_port: int = 8099              # 0 = don't serve local cover files
     cover_base_url: str = ""            # how the browser reaches us
+    cover_proxy: bool = True            # serve http(s) covers ourselves (see above)
+    cover_size: int = 480               # max edge of proxied covers; 0 = original size
     redis_host: str = "localhost"
     redis_port: int = 6379
 
@@ -116,6 +127,8 @@ def load_config(path: str) -> Optional[Config]:
         sources={str(s).lower() for s in sources} if sources else None,
         cover_port=cover_port,
         cover_base_url=cover_base_url,
+        cover_proxy=bool(sec.get("cover_proxy", True)),
+        cover_size=int(sec.get("cover_size", 480)),
         redis_host=str(cfg.get("redis_host", "localhost")),
         redis_port=int(cfg.get("redis_port", 6379)),
     )
@@ -130,18 +143,23 @@ class Covers:
     browser is still fetching."""
 
     _KEEP = 16
+    _MAX_BYTES = 8 * 1024 * 1024        # don't fetch anything bigger
 
-    def __init__(self, base_url: str) -> None:
+    def __init__(self, base_url: str, proxy: bool = False, size: int = 480) -> None:
         self.base_url = base_url
+        self.proxy = proxy and bool(base_url) and Image is not None
+        self.size = size
         self._paths: collections.OrderedDict[str, str] = collections.OrderedDict()
+        self._remote: collections.OrderedDict[str, dict] = collections.OrderedDict()
         self._lock = threading.Lock()
 
     def url_for(self, art_url: str) -> str:
-        """cover_url for HA: http(s) passes through, file:// is mapped to
-        our server (token = hash of the path, so a new cover gets a new
-        URL and the browser refetches), anything else -> ""."""
+        """cover_url for HA: file:// is mapped to our server (token = hash
+        of the path, so a new cover gets a new URL and the browser
+        refetches); http(s) is fetched and served by us when proxying is on,
+        else passed through; anything else -> ""."""
         if art_url.startswith(("http://", "https://")):
-            return art_url
+            return self._proxy_url(art_url) if self.proxy else art_url
         if not art_url.startswith("file://") or not self.base_url:
             return ""
         path = urllib.parse.unquote(urllib.parse.urlparse(art_url).path)
@@ -158,6 +176,56 @@ class Covers:
         with self._lock:
             return self._paths.get(token)
 
+    # ---- remote covers (proxy) ------------------------------------------------
+
+    def _proxy_url(self, url: str) -> str:
+        token = "r" + hashlib.sha1(url.encode()).hexdigest()[:15]
+        with self._lock:
+            entry = self._remote.get(token)
+            if entry is None:
+                entry = {"url": url, "data": None, "failed": False,
+                         "done": threading.Event()}
+                self._remote[token] = entry
+                threading.Thread(target=self._fetch, args=(entry,),
+                                 name="cover-fetch", daemon=True).start()
+                while len(self._remote) > self._KEEP:
+                    self._remote.popitem(last=False)
+            elif entry["failed"]:
+                return url                      # couldn't get it: let the client try
+            self._remote.move_to_end(token)
+        return f"{self.base_url}/cover/{token}.jpg"
+
+    def _fetch(self, entry: dict) -> None:
+        """Download, scale to `size`, re-encode as baseline JPEG (in memory)."""
+        import io
+        try:
+            req = urllib.request.Request(entry["url"], headers={
+                "User-Agent": "mdtv2-tools ha-notifier (https://github.com/tb59427/mdtv2-tools)"})
+            with urllib.request.urlopen(req, timeout=10) as r:
+                raw = r.read(self._MAX_BYTES + 1)
+            if len(raw) > self._MAX_BYTES:
+                raise ValueError("too big")
+            img = Image.open(io.BytesIO(raw)).convert("RGB")
+            if self.size:
+                img.thumbnail((self.size, self.size))
+            out = io.BytesIO()
+            img.save(out, "JPEG", quality=85)          # baseline, not progressive
+            entry["data"] = out.getvalue()
+        except Exception as e:                          # network, not an image, ...
+            log(f"cover {entry['url']}: {e} -- passing the URL through")
+            entry["failed"] = True
+        finally:
+            entry["done"].set()
+
+    def remote_for(self, token: str, wait_s: float = 15.0) -> Optional[dict]:
+        """The proxy entry ("data" = JPEG or None if the fetch failed, "url" =
+        original), after waiting for a fetch in progress."""
+        with self._lock:
+            entry = self._remote.get(token)
+        if entry is not None:
+            entry["done"].wait(wait_s)
+        return entry
+
 
 def serve_covers(covers: Covers, port: int) -> None:
     """HTTP server for /cover/<token>.<ext> in a daemon thread."""
@@ -165,22 +233,37 @@ def serve_covers(covers: Covers, port: int) -> None:
         def do_GET(self) -> None:
             name = self.path.split("?", 1)[0]
             token = name.removeprefix("/cover/").split(".", 1)[0]
-            path = covers.path_for(token) if name.startswith("/cover/") else None
-            if path is None:
+            if not name.startswith("/cover/"):
                 self.send_error(404)
                 return
-            try:
-                with open(path, "rb") as f:
-                    data = f.read()
-            except OSError as e:
-                # Typically: shairport-sync already deleted it, or it's
-                # not readable for our user.
-                log(f"cover {path}: {e}")
-                self.send_error(404)
-                return
+            if token.startswith("r"):                   # proxied http(s) cover
+                entry = covers.remote_for(token)
+                if entry is None:
+                    self.send_error(404)
+                    return
+                if entry["data"] is None:           # fetch failed: send the client there
+                    self.send_response(302)
+                    self.send_header("Location", entry["url"])
+                    self.end_headers()
+                    return
+                data, ctype = entry["data"], "image/jpeg"
+            else:
+                path = covers.path_for(token)
+                if path is None:
+                    self.send_error(404)
+                    return
+                try:
+                    with open(path, "rb") as f:
+                        data = f.read()
+                except OSError as e:
+                    # Typically: shairport-sync already deleted it, or it's
+                    # not readable for our user.
+                    log(f"cover {path}: {e}")
+                    self.send_error(404)
+                    return
+                ctype = mimetypes.guess_type(path)[0] or "image/jpeg"
             self.send_response(200)
-            self.send_header("Content-Type",
-                             mimetypes.guess_type(path)[0] or "image/jpeg")
+            self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(data)))
             self.send_header("Cache-Control", "max-age=86400")
             self.end_headers()
@@ -360,7 +443,7 @@ def main() -> int:
 
     covers = None
     if cfg.cover_port:
-        covers = Covers(cfg.cover_base_url)
+        covers = Covers(cfg.cover_base_url, proxy=cfg.cover_proxy, size=cfg.cover_size)
         try:
             serve_covers(covers, cfg.cover_port)
         except OSError as e:

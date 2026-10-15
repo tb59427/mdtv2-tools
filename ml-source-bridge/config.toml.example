@@ -387,7 +387,15 @@ display_name = "N.RADIO"        # optional; up to 11 chars ASCII
 # cover_base_url   = "http://masterlink-bridge.local:8099"
 #                            # how the browser reaches the Pi; default
 #                            # http://<hostname>.local:<cover_port>. Set an IP
-#                            # here if .local doesn't resolve on your clients.
+#                            # here if .local doesn't resolve on your clients
+#                            # (ESP32 displays usually can't resolve .local).
+# cover_proxy      = true    # also serve http(s) covers (Shazam, Cover Art
+#                            # Archive) from here: fetched once, scaled, plain
+#                            # HTTP from the LAN -- much lighter for small
+#                            # displays than HTTPS with redirects. Needs
+#                            # python3-pil; on a failed fetch the client is
+#                            # redirected to the original URL.
+# cover_size       = 480     # max edge of proxied covers in px; 0 = original
 
 
 # ---- web UI (mdt-web.service) -----------------------------------------------

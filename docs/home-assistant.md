@@ -104,7 +104,9 @@ All options (debounce, keepalive, cover port, …) are documented in
 [`config.toml.example`](../ml-source-bridge/config.toml.example) and
 [`ha-notifier/README.md`](../ha-notifier/README.md). If `<hostname>.local`
 doesn't resolve on the devices showing the dashboard, set
-`cover_base_url = "http://<pi-ip>:8099"`.
+`cover_base_url = "http://<pi-ip>:8099"` -- an IP is also what ESP32
+displays need. Covers from music recognition (Shazam / Cover Art Archive)
+are served from there too, scaled to 480 px (`cover_proxy`, `cover_size`).
 
 ### 2. HA: webhook sensor
 

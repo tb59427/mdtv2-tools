@@ -50,6 +50,16 @@ service idles until the config changes.
   the HA card loads it from there. Works when HA is opened over plain http
   in the LAN -- an https page would block it as mixed content. The service
   user (`mdt`) must be able to read the cover cache.
+* **Remote covers** (Shazam, Cover Art Archive from ml_listen / phono
+  recognition) are proxied the same way (`cover_proxy`, default on): fetched
+  once in the background, scaled to `cover_size` (480 px) and re-encoded as
+  a baseline JPEG, kept in RAM (last 16), served as
+  `.../cover/r<id>.jpg`. A request arriving while the fetch runs waits for
+  it (up to 15 s); if the fetch failed, the client gets a redirect to the
+  original URL. Reason: small displays (ESP32) choke on HTTPS with
+  redirects and 100 KB covers -- a ~25 KB JPEG over LAN HTTP loads in a
+  fraction of the time. Needs `python3-pil`; without it, http(s) covers are
+  passed through unchanged.
 
 ## Logs
 

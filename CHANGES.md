@@ -110,7 +110,9 @@ here is Philip's work, unchanged.
 - **ha-notifier** (`ha-notifier/`, new service): forwards now-playing
   changes to a Home Assistant webhook -- debounced, deduplicated, keepalive,
   retries -- and serves AirPlay cover art (shairport-sync's cover cache) on
-  port 8099. Configured in `[ha_notifier]`.
+  port 8099. Remote covers (Shazam, Cover Art Archive) are proxied there
+  too, scaled to a small baseline JPEG for ESP32 displays (`cover_proxy`,
+  needs python3-pil). Configured in `[ha_notifier]`.
 - **HA configuration** (`home-assistant/`): automations, scripts, template
   sensors and a button-card for N.MUSIC, including streams that don't come
   from Music Assistant. Guide: [docs/home-assistant.md](docs/home-assistant.md).

@@ -113,6 +113,7 @@ APT_PKGS=(
     python3-scipy         # ~72 MB, but RIAA is unusable without it
     python3-soundfile     # dl-scripts phono capture reads/writes WAV
     python3-tomlkit       # mdt-web edits the bridge config keeping comments
+    python3-pil           # ha-notifier scales proxied cover art
     ffmpeg                # dl-scripts encode their captures to FLAC
 )
 # Note: python3-numpy / python3-scipy / python3-soundfile / ffmpeg are only
