@@ -94,18 +94,20 @@ class Head:
     which fingerprints a track from its start. Reset on every new track;
     ~11.5 MB at 48 kHz, in memory only."""
 
-    def __init__(self, rate: int, seconds: float) -> None:
+    def __init__(self, rate: int, seconds: float, armed: bool = True) -> None:
         self._want = int(rate * seconds) * 2
         self._buf = bytearray()
+        self._armed = armed           # False: started mid-track, wait for the next one
         self._lock = threading.Lock()
 
     def reset(self) -> None:
         with self._lock:
             self._buf = bytearray()
+            self._armed = True
 
     def add(self, pcm: bytes) -> None:
         with self._lock:
-            if len(self._buf) < self._want:
+            if self._armed and len(self._buf) < self._want:
                 self._buf += pcm[:self._want - len(self._buf)]
 
     def get(self) -> bytes:
@@ -192,7 +194,8 @@ def run_worker(fd: int, args: argparse.Namespace) -> None:
             acoustid = None
             if args.acoustid_key:
                 import acoustid_lookup
-                head = Head(args.rate, acoustid_lookup.HEAD_S + 2)
+                head = Head(args.rate, acoustid_lookup.HEAD_S + 2,
+                            armed=not args.head_from_next_track)
                 acoustid = lambda pcm: acoustid_lookup.identify(  # noqa: E731
                     pcm, args.rate, args.acoustid_key, log)
             recognizer = pr.Recognizer(
@@ -295,6 +298,8 @@ def main() -> int:
                     help="below this a stretch counts as a gap between tracks")
     ap.add_argument("--acoustid-key", default="",
                     help="AcoustID API key: fall back to AcoustID when Shazam finds nothing")
+    ap.add_argument("--head-from-next-track", action="store_true",
+                    help="started mid-track: collect the AcoustID head from the next track on")
     ap.add_argument("--channel", default="",
                     help="redis channel for results (default link:phono:recognized)")
     ap.add_argument("--redis-host", default="localhost")

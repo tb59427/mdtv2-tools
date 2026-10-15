@@ -138,6 +138,8 @@ class BusListener:
         self._retry_at = 0.0
 
         self._am: dict = {}                      # latest state:ml "am" part
+        self._am_key: tuple = ()                 # (source, track) of self._am ...
+        self._am_since = 0.0                     # ... and since when (monotonic)
         self._wake = threading.Event()
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
@@ -212,6 +214,12 @@ class BusListener:
 
     def _evaluate(self) -> None:
         am = self._am
+        key = (am.get("source"), self._track_of(am))
+        if key != self._am_key:
+            # The first state after start (bridge restart) is not a fresh start
+            # of the source -- it may have been playing for a while.
+            fresh = time.monotonic() if self._am_key else float("-inf")
+            self._am_key, self._am_since = key, fresh
         want = self.wanted(am)
         with self._lock:
             # Forget the identified CD when it may have changed: the audio
@@ -290,6 +298,10 @@ class BusListener:
                  "--silence-db", str(self._silence_db),
                  "--channel", LISTEN_CHAN,
                  *(["--acoustid-key", self._acoustid_key] if self._acoustid_key else []),
+                 # Only a capture that starts with the track can fingerprint it;
+                 # otherwise (bridge restart, back from the turntable) wait.
+                 *(["--head-from-next-track"]
+                   if time.monotonic() - self._am_since > 5.0 else []),
                  "--redis-host", str(self._redis_host),
                  "--redis-port", str(int(self._redis_port))],
                 stdin=self._rec.stdout, stdout=subprocess.DEVNULL,
