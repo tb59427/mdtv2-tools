@@ -186,9 +186,10 @@ How it works (`core/ml_listen.py`):
   hit goes through the MusicBrainz lookup by its recording ID.
 * **CD track list:** once a CD track is identified (Shazam or AcoustID) and
   MusicBrainz confirms it at that track number, the album's track list
-  names every following track at its start -- no recognition needed. A
-  recognition that disagrees (another CD) drops it, and so does the source
-  stopping. Single-disc releases only.
+  names every following track at its start -- no recognition needed, also
+  after switching to another source and back. A recognition that disagrees
+  (another CD), standby or "load / no media" drops it. Single-disc releases
+  only. Rewind / fast forward don't stop the listener.
 * **ADC sharing** (`core/adc.py`): only one process can record. The
   turntable has priority -- when it starts its loopback, the listener stops
   first and resumes afterwards. Each sets the ADC input mux to its own input

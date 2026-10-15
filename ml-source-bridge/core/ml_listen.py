@@ -59,6 +59,10 @@ _REG_PGA_L, _REG_PGA_R = 0x01, 0x02
 _REG_ADC1L_IN, _REG_ADC1R_IN = 0x06, 0x07
 _ADC_IN_ML = 0x41            # VIN1, single-ended: the ML audio lines
 _RESTART_BACKOFF_S = 10.0    # after the capture died unexpectedly
+# Audio-master activities (state tracker): seeking still counts as playing
+# the source; standby and an open drawer mean the disc may change.
+_SEEKING = {0x03, 0x04, 0x14, 0x15}          # FF, rewind, scan fwd/rev
+_DISC_GONE = {0x06, 0x07}                    # standby, load / no media
 # Silence longer than this while "playing": report the source idle anyway.
 # The state tracker can miss a stop (a source-less RELEASE stops the audio
 # master's source but isn't reported back); the audio itself doesn't lie.
@@ -177,10 +181,17 @@ class BusListener:
 
     # ---- decisions -----------------------------------------------------------
 
+    @staticmethod
+    def _activity(am: dict) -> Optional[int]:
+        try:
+            return int(str(am.get("activity")), 16)
+        except (TypeError, ValueError):
+            return None
+
     def wanted(self, am: dict) -> Optional[tuple[int, str]]:
         """(source byte, name) to listen to for this audio-master state, or
         None."""
-        if not am.get("playing"):
+        if not am.get("playing") and self._activity(am) not in _SEEKING:
             return None
         try:
             src = int(str(am.get("source")), 16)
@@ -203,6 +214,14 @@ class BusListener:
         am = self._am
         want = self.wanted(am)
         with self._lock:
+            # Forget the identified CD when it may have changed: the audio
+            # master goes to standby, or reports load / no media for it.
+            if self._disc is not None and (
+                    am.get("source") is None
+                    or (self._activity(am) in _DISC_GONE
+                        and str(am.get("source")) == f"0x{self._disc['source']:02x}")):
+                log(f"[listen] forgetting {self._disc['album']} (standby / disc out)")
+                self._disc = None
             if self._suspended or adc.turntable_active():
                 want = None
             if self._rec is not None and (self._rec.poll() is not None
@@ -290,6 +309,7 @@ class BusListener:
         self._album_pending = False
         self._silent_since, self._silent = None, False
         log(f"[listen] listening to {name} (0x{src:02x})")
+        self._predict_from_disc()               # back on a CD we already identified
         self._publish()
 
     def _stop_capture(self, *, publish_idle: bool) -> None:
@@ -301,7 +321,6 @@ class BusListener:
         self._kill(tap)
         self._kill(rec)
         src, name = self._src, self._src_name
-        self._disc = None
         self._recognized = None
         self._album_pending = False
         self._src, self._track = None, None
@@ -454,7 +473,7 @@ class BusListener:
         with self._lock:
             if tracks and self._src is not None:
                 self._disc = {"album": found["album"], "cover_url": found["cover_url"],
-                              "tracks": tracks}
+                              "tracks": tracks, "source": self._src}
                 log(f"[listen] {self._src_name}: {found['album']} -- "
                     f"{len(tracks)} tracks, titles by track number from now on")
             cur = self._recognized
@@ -474,7 +493,8 @@ class BusListener:
     def _predict_from_disc(self) -> None:
         """With self._lock held, after a track change: the title from the
         identified CD's track list, until a recognition says otherwise."""
-        if not self._disc or self._recognized is not None:
+        if (not self._disc or self._recognized is not None
+                or self._disc["source"] != self._src):
             return
         t = self._disc["tracks"].get(self._track)
         if t:
