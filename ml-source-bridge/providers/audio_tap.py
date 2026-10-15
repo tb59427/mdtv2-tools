@@ -223,6 +223,7 @@ def run_worker(fd: int, args: argparse.Namespace) -> None:
         if signalled:
             last_signal[0] = now
         elif now - last_signal[0] < 5.0:
+            log("music")                  # same track: only "sound again" (silence check)
             return
         log("new track")
         if head is not None:

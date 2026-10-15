@@ -379,7 +379,7 @@ class BusListener:
                     continue                    # an old capture's last words
                 if line == "[tap] gap":
                     self._silent_since = time.monotonic()
-                elif line == "[tap] new track":
+                elif line in ("[tap] new track", "[tap] music"):
                     self._silent_since = None
                     if self._silent:
                         self._silent = False
