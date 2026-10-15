@@ -9,9 +9,10 @@ need audio from the track's beginning -- the tap keeps it (`Head`).
 The catch: a lookup also wants the track's total duration, and only
 matches within about +-7 s of it (measured: a 290 s track was found with
 283..297, not with 278 or 302). While the track plays we don't know it, so
-we scan durations in 14 s steps -- likely lengths first -- and stop at the
-first hit. At most ~45 requests, ~15 s at AcoustID's limit of 3 per second,
-once per track that Shazam doesn't know.
+we scan durations in 14 s steps and keep the best-scoring hit: the first
+hit can be another version of the same song (a later re-recording ~20 s
+shorter matched before the CD's own version). ~45 requests, ~15 s at
+AcoustID's limit of 3 per second, once per track that Shazam doesn't know.
 
 Needs `fpcalc` (Debian package libchromaprint-tools) and an AcoustID API key
 (free, acoustid.org -> "Register application"). Standard library only.
@@ -52,7 +53,7 @@ def fingerprint(pcm: bytes, rate: int, timeout: float = 30.0) -> str:
 
 
 def best_match(data: dict) -> Optional[dict]:
-    """AcoustID response -> {title, artist, recording_mbid} of the best
+    """AcoustID response -> {title, artist, recording_mbid, score} of the best
     result with a recording, or None (pure, testable)."""
     if data.get("status") != "ok":
         return None
@@ -64,7 +65,7 @@ def best_match(data: dict) -> Optional[dict]:
                 artist = "".join(a.get("name", "") + (a.get("joinphrase") or "")
                                  for a in rec.get("artists") or []).strip()
                 return {"title": rec["title"], "artist": artist,
-                        "recording_mbid": rec.get("id", "")}
+                        "recording_mbid": rec.get("id", ""), "score": res.get("score", 0)}
     return None
 
 
@@ -80,7 +81,8 @@ def identify(pcm: bytes, rate: int, key: str,
         log(f"[acoustid] fpcalc failed: {e}")
         return None
     last = 0.0
-    for n, dur in enumerate(scan_durations(), 1):
+    best, best_dur = None, 0
+    for dur in scan_durations():
         wait = _MIN_INTERVAL_S - (time.monotonic() - last)
         if wait > 0:
             time.sleep(wait)
@@ -97,9 +99,12 @@ def identify(pcm: bytes, rate: int, key: str,
             log(f"[acoustid] error: {data.get('error', data)}")
             return None
         hit = best_match(data)
-        if hit:
-            log(f"[acoustid] {hit['artist']} - {hit['title']} "
-                f"(duration ~{dur} s, request {n})")
-            return {**hit, "album": "", "cover_url": "", "isrc": ""}
-    log("[acoustid] no match")
-    return None
+        if hit and (best is None or hit["score"] > best["score"]):
+            best, best_dur = hit, dur
+    if best is None:
+        log("[acoustid] no match")
+        return None
+    log(f"[acoustid] {best['artist']} - {best['title']} "
+        f"(score {best['score']:.2f}, duration ~{best_dur} s)")
+    best.pop("score")
+    return {**best, "album": "", "cover_url": "", "isrc": ""}

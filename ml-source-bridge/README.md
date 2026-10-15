@@ -181,9 +181,11 @@ How it works (`core/ml_listen.py`):
   minutes in memory; after two Shazam misses `fpcalc` fingerprints them and
   AcoustID -- MusicBrainz's fingerprint database -- is asked. A lookup needs
   the track's total length to within about +-7 s (measured), which nobody
-  knows while it plays, so durations are scanned in 14 s steps, likely
-  lengths first (at most ~45 requests, ~15 s, once per unknown track). The
-  hit goes through the MusicBrainz lookup by its recording ID.
+  knows while it plays, so durations are scanned in 14 s steps (~45
+  requests, ~15 s, once per unknown track) and the best-scoring hit wins:
+  the first hit can be another version of the same song (a later
+  re-recording matched before the CD's own version). The hit goes through
+  the MusicBrainz lookup by its recording ID.
 * **CD track list:** once a CD track is identified (Shazam or AcoustID) and
   MusicBrainz confirms it at that track number, the album's track list
   names every following track at its start -- no recognition needed, also
