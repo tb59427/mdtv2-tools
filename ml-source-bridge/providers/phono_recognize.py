@@ -139,6 +139,9 @@ class Recognizer:
     # ---- policy (pure, called from the worker thread) -----------------------
 
     def _reset(self, now: float) -> None:
+        # Bumped on every new track: a result from an attempt that started
+        # before is about the previous track and gets dropped.
+        self._generation = getattr(self, "_generation", 0) + 1
         self._track_start = now
         self._next_at = now + self.snippet_s
         self._candidate: Optional[dict] = None
@@ -196,6 +199,8 @@ class Recognizer:
 
     def attempt(self, now: float) -> None:
         """One recognition on the newest snippet_s seconds of this track."""
+        with self._lock:
+            generation = self._generation
         pcm = self.snapshot(self.snippet_s)
         if not pcm:
             with self._lock:
@@ -208,6 +213,10 @@ class Recognizer:
             with self._lock:
                 self._next_at = now + 60.0
             return
+        with self._lock:
+            stale = generation != self._generation
+        if stale:
+            return                                    # the track changed meanwhile
         out = self.on_result(describe(result), self.clock())
         if out is not None:
             self.publish(out)
