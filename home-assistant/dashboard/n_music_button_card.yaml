@@ -175,7 +175,12 @@ styles:
         [[[
           // Turntable: recognized cover, else the default image.
           // Bus source (CD, ...): recognized cover, else bus_image.
-          // N.MUSIC: cover from MA or -- for AirPlay & co. -- from the Pi.
+          // N.MUSIC: cover from MA or -- for AirPlay & co. -- from the Pi;
+          // internet radio: the looked-up track cover (sensor.n_music_radio_cover)
+          // while it belongs to the current title, else MA's picture.
+          const rc = states['sensor.n_music_radio_cover']?.attributes;
+          const radioCover = rc && rc.cover_url && rc.titel === entity.attributes.media_title
+            ? rc.cover_url : null;
           const pic = variables.phono
             ? (variables.phono_known && states['sensor.mdt_phono'].attributes.cover_url)
                 || variables.phono_image
@@ -184,7 +189,7 @@ styles:
                   || variables.bus_image
             : variables.ext
               ? states['sensor.mdt_n_music'].attributes.cover_url
-              : entity.attributes.entity_picture;
+              : radioCover || entity.attributes.entity_picture;
           const shade = 'linear-gradient(rgba(0,0,0,0.2), rgba(0,0,0,0.75))';
           return pic
             ? `${shade}, url("${pic}") center / cover no-repeat`

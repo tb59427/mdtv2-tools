@@ -1,0 +1,117 @@
+# Cover for N.MUSIC internet radio, when Music Assistant has none
+#
+# MA looks covers up itself (MusicBrainz); for many radio tracks it finds
+# nothing and shows the station logo. This looks the playing track up:
+#   - Radio Swiss Jazz / Classic / Pop: the station's own playlist API
+#     (previous, current and next tracks with cover). The entry whose title
+#     matches MA's title is used, so picture and sound stay together even
+#     though the stream lags behind the API.
+#   - any other station: Apple iTunes Search (artist + title), only when the
+#     result's title matches.
+# Runs when MA's title changes; for Radio Swiss it retries every 30 s until
+# the API lists the track.
+#
+#   sensor.n_music_radio_cover   attributes: titel (the MA title the cover
+#                                belongs to), cover_url, quelle
+#   image.n_music_radio_cover    the same cover served by HA (plain http in
+#                                the LAN, for ESP32 displays)
+#
+# Consumers use cover_url only while `titel` equals the player's media_title.
+#
+# Add to configuration.yaml: `rest_command:` at top level, the two list items
+# under your `template:`.
+
+rest_command:
+  n_music_cover_get:
+    url: "{{ url }}"
+    method: get
+    timeout: 10
+
+template:
+  - trigger:
+      - trigger: state
+        entity_id: media_player.masterlink_bridge_ma
+        attribute: media_title
+      - trigger: time_pattern
+        seconds: "/30"
+    condition:
+      - condition: template
+        value_template: >-
+          {%- set p = 'media_player.masterlink_bridge_ma' -%}
+          {%- set t = state_attr(p, 'media_title') or '' -%}
+          {%- set swiss = (state_attr(p, 'media_album_name') or '') in
+                ['Radio Swiss Jazz', 'Radio Swiss Classic', 'Radio Swiss Pop'] -%}
+          {{ is_state(p, 'playing') and '://radio' in (state_attr(p, 'media_content_id') or '')
+             and t != ''
+             and (trigger.platform == 'state'
+                  or (swiss and state_attr('sensor.n_music_radio_cover', 'titel') != t)) }}
+    action:
+      - variables:
+          p: media_player.masterlink_bridge_ma
+          titel: "{{ state_attr(p, 'media_title') or '' }}"
+          artist: "{{ state_attr(p, 'media_artist') or '' }}"
+          station: "{{ state_attr(p, 'media_album_name') or '' }}"
+          swiss: >-
+            {{ {'Radio Swiss Jazz': 'rsj', 'Radio Swiss Classic': 'rsc',
+                'Radio Swiss Pop': 'rsp'}.get(station, '') }}
+          norm_titel: "{{ titel | lower | regex_replace('[^a-z0-9]', '') }}"
+          cover: ""
+          quelle: ""
+      - if: "{{ swiss != '' }}"
+        then:
+          - action: rest_command.n_music_cover_get
+            data:
+              url: >-
+                https://api.{{ {'rsj': 'radioswissjazz', 'rsc': 'radioswissclassic',
+                'rsp': 'radioswisspop'}[swiss] }}.ch/api/v1/{{ swiss }}/de/playlist_small
+            response_variable: antwort
+            continue_on_error: true
+          - variables:
+              cover: >-
+                {%- set c = antwort.content if antwort is defined and antwort.content is mapping else {} -%}
+                {%- set pn = c.channel.playingnow if c.channel is defined and c.channel.playingnow is defined else {} -%}
+                {%- set eintraege = (pn.previous or []) + ([pn.current] if pn.current else []) + (pn.next or []) -%}
+                {%- set ns = namespace(url='') -%}
+                {%- for e in eintraege if not ns.url -%}
+                  {%- set m = e.metadata or {} -%}
+                  {%- if m.coverId and (m.title or '') | lower | regex_replace('[^a-z0-9]', '') == norm_titel -%}
+                    {%- set ns.url = 'https://cdne-satr-prd-' ~ swiss ~ '-covers.azureedge.net/350/' ~ m.coverId ~ '.jpg' -%}
+                  {%- endif -%}
+                {%- endfor -%}
+                {{ ns.url }}
+              quelle: "{{ station if cover else '' }}"
+        else:
+          - action: rest_command.n_music_cover_get
+            data:
+              url: >-
+                https://itunes.apple.com/search?media=music&entity=song&limit=5&term={{ (artist ~ ' ' ~ titel) | urlencode }}
+            response_variable: antwort
+            continue_on_error: true
+          - variables:
+              cover: >-
+                {%- set raw = antwort.content if antwort is defined else '' -%}
+                {%- set c = raw if raw is mapping else (raw | from_json(default={})) -%}
+                {%- set ns = namespace(url='') -%}
+                {%- for r in (c.results or []) if not ns.url -%}
+                  {%- set rt = (r.trackName or '') | lower | regex_replace('[^a-z0-9]', '') -%}
+                  {%- if rt and (rt == norm_titel or rt.startswith(norm_titel) or norm_titel.startswith(rt)) and r.artworkUrl100 -%}
+                    {%- set ns.url = r.artworkUrl100 | replace('100x100bb', '600x600bb') -%}
+                  {%- endif -%}
+                {%- endfor -%}
+                {{ ns.url }}
+              quelle: "{{ 'iTunes' if cover else '' }}"
+    sensor:
+      - name: N.MUSIC Radio Cover
+        unique_id: n_music_radio_cover
+        icon: mdi:image-album
+        state: "{{ 'gefunden' if cover else 'keins' }}"
+        attributes:
+          titel: "{{ titel }}"
+          cover_url: "{{ cover }}"
+          quelle: "{{ quelle }}"
+
+  - image:
+      - name: N.MUSIC Radio Cover
+        unique_id: n_music_radio_cover_image
+        url: "{{ state_attr('sensor.n_music_radio_cover', 'cover_url') or '' }}"
+        availability: "{{ (state_attr('sensor.n_music_radio_cover', 'cover_url') or '') != '' }}"

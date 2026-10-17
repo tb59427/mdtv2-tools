@@ -65,6 +65,8 @@ media_player.masterlink_bridge_ma (MA's view) ───────────�
 | `sensor.mdt_ml_listen` | trigger template sensor (same webhook) | Other bus sources the Pi recognizes (`[ml_listen]`): state, source, track, title / artist / album / cover |
 | `sensor.n_music_quelle` | template sensor | Source label: `Internet Radio` / `Tidal` / `Music Assistant` / `Extern` / provider name from the Pi (e.g. `Apple Music`) / `–` |
 | `sensor.n_music_inhalt` | template sensor | Station or playlist name; album for non-MA streams; `–` |
+| `sensor.n_music_radio_cover` | trigger template sensor (optional) | Cover of the radio track MA plays, when MA has none: `titel`, `cover_url`, `quelle` |
+| `image.n_music_radio_cover` | template image (optional) | The same cover, served by HA (plain http, for ESP32 displays) |
 | `input_select.radio_station_list` | helper | Radio stations = MA favourites, filled by an automation |
 | `input_text.radio_default_station` | helper | Station selected after a restart |
 | `input_text.n_music_inhalt` | helper (max 255) | Name of the playlist started via Beo4 (MA doesn't expose it) |
@@ -164,6 +166,28 @@ which MA puts in `media_album_name`), a playlist name in
 `input_text.n_music_inhalt` = Tidal, a source other than
 `Music Assistant Queue` = Extern.
 
+#### Optional: covers for internet radio
+
+Music Assistant looks radio track covers up itself (MusicBrainz) but often
+finds nothing and shows the station logo.
+[`templates/n_music_radio_cover.yaml`](../home-assistant/templates/n_music_radio_cover.yaml)
+(a `rest_command` plus a trigger template sensor and a template image, for
+`configuration.yaml`) looks the playing track up when MA's title changes:
+
+- **Radio Swiss Jazz / Classic / Pop:** the station's playlist API
+  (`api.radioswissjazz.ch/api/v1/rsj/de/playlist_small`, likewise `rsc` /
+  `rsp`), which lists previous, current and next tracks with a cover id. The
+  entry whose title matches MA's title is used, so picture and sound stay
+  together although the stream lags behind the API; it retries every 30 s
+  until the track is listed.
+- **Other stations:** Apple iTunes Search (artist + title), once per title,
+  used only if the result's title matches.
+
+The dashboard card shows this cover while its `titel` equals the player's
+`media_title`, else MA's picture. Station names are matched against MA's
+`media_album_name`; another station with its own playlist API can be added
+the same way.
+
 ### 5. Scripts and automations
 
 Paste each file via *New script / New automation → ⋮ → Edit in YAML*:
@@ -236,6 +260,7 @@ Settings at the top of the card, under `variables`:
 |---|---|
 | `sensor.mdt_n_music` never changes | `journalctl -u ha-notifier`: POST errors? Webhook id identical on both sides? `sources` matches the source's `display_name`? |
 | Sensor right, card missing | State of `sensor.n_music_quelle` -- still the old template? In *Developer tools → Template* paste the `.jinja` file to see what it yields. |
+| No radio cover | `sensor.n_music_radio_cover`: `keins` = nothing found; `titel` differs from the player's `media_title` = not for this track (yet). Card still shows the logo although the sensor has one: reload the browser page (the dashboard config is cached). |
 | No cover for AirPlay | Open `cover_url` from the sensor in a browser. Not loading: `.local` name not resolving (set `cover_base_url`), or `mdt` can't read shairport-sync's cover cache (see `journalctl -u ha-notifier`). HA opened via https: blocked as mixed content. |
 | Nothing on redis | `redis-cli SUBSCRIBE link:ml:nowplaying` on the Pi; see [providers.md](providers.md). |
 

@@ -9,7 +9,7 @@ recognition, Beo4 control, one dashboard card for all of it.
 |---|---|
 | `automations/` | Automations, one per file, in the format of HA's YAML editor |
 | `scripts/` | Scripts, same format |
-| `templates/` | State templates of the template sensors (`.jinja`) and the webhook sensor `sensor.mdt_n_music` (goes into `configuration.yaml`) |
+| `templates/` | State templates of the template sensors (`.jinja`), the webhook sensor `sensor.mdt_n_music` and the optional radio cover lookup `n_music_radio_cover.yaml` (both go into `configuration.yaml`) |
 | `dashboard/` | The card (needs `custom:button-card` from HACS) |
 | `helpers/` | Reference list of the helpers (documentation only) |
 | `www/mdt/` | Default turntable image for the card -- copy to `/config/www/mdt/` |
