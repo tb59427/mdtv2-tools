@@ -116,7 +116,9 @@ here is Philip's work, unchanged.
 - **HA configuration** (`home-assistant/`): automations, scripts, template
   sensors and a button-card for N.MUSIC, including streams that don't come
   from Music Assistant. Optional cover lookup for internet radio (Radio
-  Swiss playlist API, else iTunes Search) when MA has no cover. Guide: [docs/home-assistant.md](docs/home-assistant.md).
+  Swiss playlist API, else iTunes Search) when MA has no cover. Optional
+  sensor of the MasterLink rooms listening, shown in the card with own
+  icons for classic B&O products (`www/beo-icons/`). Guide: [docs/home-assistant.md](docs/home-assistant.md).
 
 ### Web UI
 

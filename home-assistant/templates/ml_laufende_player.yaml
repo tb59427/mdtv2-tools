@@ -1,0 +1,47 @@
+# Which MasterLink rooms are listening right now, with an icon per device
+#
+# On MasterLink every device that is on plays the one source the audio master
+# distributes, so "not off" = listening. The list comes from the media_player
+# entities of the mlgw integration (one per MLN device).
+#
+#   sensor.ml_laufende_player   state: number of rooms listening
+#                               attribute player: [{entity, raum, icon, kurz, name}]
+#
+# raum = the room from the friendly name "Room (Device)", or the override in
+# the table (third column) for players whose name has no room; kurz = the
+# short device name the dashboard card shows (fourth column). Icons: beo:*
+# from www/beo-icons/beo-icons.js (dashboard resource), or any mdi: icon.
+#
+# Add under your `template:` in configuration.yaml; adjust the table.
+
+template:
+  - sensor:
+      - name: ML laufende Player
+        unique_id: ml_laufende_player
+        icon: mdi:speaker-multiple
+        state: >-
+          {%- set geraete = [
+                'media_player.beosound_9000', 'media_player.beovision_6_24',
+                'media_player.beovision_7_40_mk_ii', 'media_player.beolab_3500_mk_ii_wl',
+                'media_player.beolab_2000', 'media_player.passive',
+                'media_player.arbeitszimmer_beolink_pc'] -%}
+          {{ geraete | reject('is_state', ['off', 'unavailable', 'unknown', 'standby']) | list | count }}
+        attributes:
+          player: >-
+            {%- set geraete = [
+                  ('media_player.beosound_9000',           'beo:beovision-10',     '', 'BV10'),
+                  ('media_player.beovision_6_24',          'beo:beovision-6',      'Arbeitszimmer', 'BV6'),
+                  ('media_player.beovision_7_40_mk_ii',    'beo:beovision-7',      '', 'BV7'),
+                  ('media_player.beolab_3500_mk_ii_wl',    'beo:beolab-3500',      '', 'BL3500'),
+                  ('media_player.beolab_2000',             'beo:beolab-2000',      '', 'BL2000'),
+                  ('media_player.passive',                 'beo:beolink-passive',  '', 'Passive'),
+                  ('media_player.arbeitszimmer_beolink_pc', 'mdi:monitor',         'Arbeitszimmer', 'PC2'),
+                ] -%}
+            {%- set ns = namespace(l=[]) -%}
+            {%- for e, icon, raum, kurz in geraete
+                  if states(e) not in ['off', 'unavailable', 'unknown', 'standby'] -%}
+              {%- set fn = state_attr(e, 'friendly_name') or e -%}
+              {%- set r = raum or (fn.split(' (')[0] if ' (' in fn else fn) -%}
+              {%- set ns.l = ns.l + [{'entity': e, 'raum': r, 'icon': icon, 'kurz': kurz, 'name': fn}] -%}
+            {%- endfor -%}
+            {{ ns.l }}

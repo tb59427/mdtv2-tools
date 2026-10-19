@@ -67,6 +67,7 @@ media_player.masterlink_bridge_ma (MA's view) ───────────�
 | `sensor.n_music_inhalt` | template sensor | Station or playlist name; album for non-MA streams; `–` |
 | `sensor.n_music_radio_cover` | trigger template sensor (optional) | Cover of the radio track MA plays, when MA has none: `titel`, `cover_url`, `quelle` |
 | `image.n_music_radio_cover` | template image (optional) | The same cover, served by HA (plain http, for ESP32 displays) |
+| `sensor.ml_laufende_player` | template sensor (optional) | MasterLink devices that are on (so listening), with room, short name and icon |
 | `input_select.radio_station_list` | helper | Radio stations = MA favourites, filled by an automation |
 | `input_text.radio_default_station` | helper | Station selected after a restart |
 | `input_text.n_music_inhalt` | helper (max 255) | Name of the playlist started via Beo4 (MA doesn't expose it) |
@@ -187,6 +188,28 @@ The dashboard card shows this cover while its `titel` equals the player's
 `media_title`, else MA's picture. Station names are matched against MA's
 `media_album_name`; another station with its own playlist API can be added
 the same way.
+
+#### Optional: which rooms are listening
+
+On MasterLink every device that is on plays the source the audio master
+distributes. [`templates/ml_laufende_player.yaml`](../home-assistant/templates/ml_laufende_player.yaml)
+turns the mlgw integration's `media_player` entities into
+`sensor.ml_laufende_player` (count; attribute `player` with room, short name
+and icon per device). The dashboard card shows a row of icons with short
+names below the artist, the room as tooltip. Edit the device table in the
+template: entity, icon, room override, short name.
+
+The icons are drawn for this project
+([`www/beo-icons/beo-icons.js`](../home-assistant/www/beo-icons/beo-icons.js),
+simplified pictograms, not B&O artwork): `beo:beovision-6`, `beo:beovision-7`,
+`beo:beovision-10`, `beo:beolab-3500`, `beo:beolab-2000`, `beo:beolink-passive`.
+Copy the file to `/config/www/beo-icons/` and add `/local/beo-icons/beo-icons.js`
+as a dashboard resource (JavaScript module); then any card can use them, like
+mdi icons.
+
+The mlgw integration learns device states only from bus events: after an HA
+restart a device that kept playing shows `off` until it changes (switch it off
+and on again).
 
 ### 5. Scripts and automations
 

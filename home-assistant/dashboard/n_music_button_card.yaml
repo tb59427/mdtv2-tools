@@ -101,6 +101,16 @@ custom_fields:
         ? states['sensor.mdt_n_music'].attributes.artist || ''
         : entity.attributes.media_artist || '';
     ]]]
+  # Rooms listening (every ML device that is on plays the distributed source),
+  # with an icon per device: sensor.ml_laufende_player (templates/ml_laufende_player.yaml)
+  # and the beo: icons (www/beo-icons/beo-icons.js as a dashboard resource).
+  player: >
+    [[[
+      const p = states['sensor.ml_laufende_player']?.attributes?.player || [];
+      // per device: icon and short name (the room is in the tooltip)
+      return p.map((x) => `<span title="${x.raum}" style="display:inline-flex;align-items:center;gap:3px;margin-right:10px">` +
+        `<ha-icon icon="${x.icon}" style="--mdc-icon-size:18px"></ha-icon>${x.kurz || x.raum}</span>`).join('');
+    ]]]
   prev:
     card:
       type: custom:button-card
@@ -196,9 +206,9 @@ styles:
             : `${shade}, var(--primary-color)`;
         ]]]
   grid:
-    - grid-template-areas: '"quelle quelle quelle" "titel titel titel" "artist artist artist" "prev play next"'
+    - grid-template-areas: '"quelle quelle quelle" "titel titel titel" "artist artist artist" "player player player" "prev play next"'
     - grid-template-columns: 1fr 1fr 1fr
-    - grid-template-rows: auto 1fr auto auto
+    - grid-template-rows: auto 1fr auto auto auto
   custom_fields:
     quelle:
       - justify-self: start
@@ -217,6 +227,12 @@ styles:
       - text-align: left
       - opacity: 0.85
       - margin-bottom: 8px
+    player:
+      - justify-self: start
+      - text-align: left
+      - font-size: 0.8em
+      - opacity: 0.9
+      - margin-bottom: 4px
     prev:
       - display: "[[[ return variables.ext || variables.phono || variables.bus ? 'none' : 'block'; ]]]"
     play:
