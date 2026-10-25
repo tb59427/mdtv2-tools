@@ -98,8 +98,8 @@ class Recognizer:
     Optional AcoustID fallback: `head()` returns the track's first `head_s`
     seconds once complete (else b""), `acoustid(pcm)` identifies them
     (acoustid_lookup.identify). Tried once per track, after two attempts
-    without a Shazam match; a hit is shown until the next track (Shazam's
-    re-checks would only miss again)."""
+    without a Shazam match (or with Shazam unreachable); a hit is shown
+    until the next track (Shazam's re-checks would only miss again)."""
 
     def __init__(self, *, rate: int,
                  snapshot: Callable[[float], bytes],
@@ -161,6 +161,7 @@ class Recognizer:
         self._misses = 0
         self._retry = 0
         self._ac_tried = False                 # AcoustID asked for this track
+        self._head_at = now + self.head_s      # when the head should be complete
         self._via = ""                         # "acoustid" when shown from there
 
     @staticmethod
@@ -218,13 +219,18 @@ class Recognizer:
         with self._lock:
             due = self._next_at
             if self._acoustid_pending():         # wake when the head is complete
-                due = min(due, self._track_start + self.head_s)
+                due = min(due, self._head_at)
             return due - now
 
     def attempt(self, now: float) -> None:
         """One recognition on the newest snippet_s seconds of this track."""
         with self._lock:
             generation = self._generation
+            head_turn = self._acoustid_pending() and now < self._next_at
+        if head_turn:
+            # Woken for the head, not for Shazam: don't spend a request.
+            self._try_acoustid(generation)
+            return
         pcm = self.snapshot(self.snippet_s)
         if not pcm:
             with self._lock:
@@ -236,6 +242,9 @@ class Recognizer:
             self.log(f"[recognize] request failed: {e}")
             with self._lock:
                 self._next_at = now + 60.0
+                if self._shown is None:
+                    self._retry += 1                  # Shazam down: AcoustID may still know it
+            self._try_acoustid(generation)
             return
         with self._lock:
             stale = generation != self._generation
@@ -255,7 +264,12 @@ class Recognizer:
                 return
         head = self._head()
         if not head:
-            return                                    # not 2 minutes in yet
+            # Not complete yet (capture started late, or mid-track and
+            # waiting for the next one): look again later. Without this
+            # the head stays due and every loop fires a Shazam request.
+            with self._lock:
+                self._head_at = self.clock() + 10.0
+            return
         with self._lock:
             self._ac_tried = True
         hit = self._acoustid(head)
