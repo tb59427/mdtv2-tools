@@ -117,13 +117,18 @@ real device *does* answer); if occupied it falls back through
 purely passive. The default `0x7f` is the top of the link range, where
 real link rooms are least likely to be assigned.
 
-The `0x08` reply gives the **source** but not the track. To also fetch
-the **track/channel**, once the source is known the tracker sends a
-`GOTO_SOURCE` for that *same* source — a link-join / re-announce, **not**
-a source switch, so it stays non-disruptive (playback continues). The AM
-responds by broadcasting a full `STATUS_INFO` (with `CH_TRACK`), which
-the listen loop parses. In practice `state:ml` has the source within
-~1 s and the track within ~2 s of start.
+The `0x08` reply gives the **source** but not the track; the track
+follows with the next spontaneous broadcast (track change, source
+change). With `--goto` the tracker fetches it at once: it sends a
+`GOTO_SOURCE` for that *same* source — a link-join, **not** a source
+switch, so playback continues, and the AM broadcasts a full
+`STATUS_INFO` (with `CH_TRACK`) within ~2 s.
+
+**`--goto` is off by default for a reason:** the AM then counts the
+query address as a listening link room until the source ends. Nothing
+releases it, so when the last real room switches off, the AM keeps
+playing for the phantom (measured: CD kept playing after every room was
+off; a RELEASE sent as 0x7f stopped it at once).
 
 These are the only telegrams the tracker transmits. Flags:
 
@@ -131,9 +136,8 @@ These are the only telegrams the tracker transmits. Flags:
 --query-addr 0x7f   link-room address to emulate (default 0x7f; verified
                     free at startup, auto-falls-back if occupied)
 --no-query          disable the query entirely (purely passive)
---no-goto           do the source query but skip the GOTO-refresh: keeps
-                    it strictly read-only (no phantom link-join), at the
-                    cost of no track until the next spontaneous broadcast
+--goto              also join the current source to fetch the track at
+                    once (see above: keeps the source alive)
 --no-discover       disable device discovery: no startup sweep, no
                     state:ml:devices key, ignore link:ml:discover
 --sweep-passes N    probes per address per sweep (default 1). 1 = single
@@ -144,10 +148,7 @@ These are the only telegrams the tracker transmits. Flags:
 ```
 
 The address is auto-verified (above), so you normally don't need to touch
-it; use `--no-query` to disable the query entirely. The GOTO-refresh
-registers the query address as momentarily "joined" in the AM's
-bookkeeping (benign — no audio is drawn, the source is already playing);
-`--no-goto` avoids even that if you want the query to be purely a read.
+it; use `--no-query` to disable the query entirely.
 
 ### `state:ml:devices` — device discovery
 

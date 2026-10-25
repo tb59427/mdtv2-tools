@@ -885,18 +885,20 @@ def _select_query_addr(r: "redis.StrictRedis", stop: threading.Event,
 
 def _startup_query(r: "redis.StrictRedis", ml: "MLState",
                    stop: threading.Event, link_addr: int,
-                   do_goto: bool = True,
+                   do_goto: bool = False,
                    attempts: int = 5, interval: float = 3.0) -> None:
     """Populate state:ml at startup by emulating a link-room speaker.
 
     Phase 1 -- learn the source: ask both masters (AM 0xC1, VM 0xC0)
     REQUEST_DISTRIBUTED_SOURCE. Non-disruptive read.
 
-    Phase 2 (if do_goto) -- fetch the track: once we know an audio
-    source but not its track, send GOTO_SOURCE for that SAME source.
-    That's a link-join/re-announce (not a switch), so it's
-    non-disruptive, and it makes the AM broadcast a full STATUS_INFO
-    with CH_TRACK which the listen loop then parses.
+    Phase 2 (only if do_goto, off by default) -- fetch the track: once
+    we know an audio source but not its track, send GOTO_SOURCE for that
+    SAME source. That's a link-join (not a switch), so playback goes on,
+    and the AM broadcasts a full STATUS_INFO with CH_TRACK. But the AM
+    then counts link_addr as a listener until the source ends: a RELEASE
+    from the real last room no longer stops it (measured: CD kept
+    playing after every room was off).
     """
     # Verify the address we're about to emulate isn't a real device first
     # (a real device there stays silent to the query, so we must probe it).
@@ -946,7 +948,7 @@ def _startup_query(r: "redis.StrictRedis", ml: "MLState",
 
 def listen(redis_host: str, redis_port: int, stop: threading.Event,
            query_addr: Optional[int] = DEFAULT_QUERY_ADDR,
-           do_goto: bool = True, discover: bool = True,
+           do_goto: bool = False, discover: bool = True,
            sweep_passes: int = SWEEP_PASSES,
            sweep_gap: float = SWEEP_GAP_S) -> None:
     r = redis.StrictRedis(host=redis_host, port=redis_port, db=0,
@@ -1106,11 +1108,14 @@ def main() -> int:
                     help="disable the startup source query (purely passive; "
                          "use this if a real link speaker occupies the query "
                          "address)")
+    ap.add_argument("--goto", action="store_true",
+                    help="after the source query, join the current source "
+                         "(GOTO_SOURCE) to fetch the track at once. Off by "
+                         "default: the AM then counts the query address as a "
+                         "listener until the source ends, so switching off the "
+                         "last real room no longer stops e.g. a CD.")
     ap.add_argument("--no-goto", action="store_true",
-                    help="skip the startup GOTO-refresh that fetches the "
-                         "track (keeps the query read-only: source only, no "
-                         "phantom link-join). Track then comes from the next "
-                         "spontaneous broadcast.")
+                    help=argparse.SUPPRESS)  # old flag; no GOTO is the default now
     ap.add_argument("--no-discover", action="store_true",
                     help="disable device discovery: no startup MASTER_PRESENT "
                          "sweep, no state:ml:devices key, ignore the "
@@ -1145,7 +1150,7 @@ def main() -> int:
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
 
     listen(args.redis_host, args.redis_port, stop, query_addr=query_addr,
-           do_goto=not args.no_goto, discover=not args.no_discover,
+           do_goto=args.goto and not args.no_goto, discover=not args.no_discover,
            sweep_passes=max(1, args.sweep_passes),
            sweep_gap=max(0.0, args.sweep_gap))
     return 0

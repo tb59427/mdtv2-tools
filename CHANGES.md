@@ -72,6 +72,14 @@ here is Philip's work, unchanged.
   bridge restart. Now only when one of our sources is in use (a provider
   plays, the bus granted it to us, or the state tracker sees it on the bus).
 
+### State tracker: no phantom link room
+
+- At startup the state tracker joined the playing audio source as link
+  room 0x7f (GOTO_SOURCE) to learn the track, and never released it. The
+  audio master then kept e.g. a CD playing after the last real room was
+  switched off. That join is now opt-in (`--goto`); the track follows with
+  the next broadcast. `--no-goto` is still accepted.
+
 ### Music recognition on the bus
 
 - Optional (`[ml_listen] enabled = true`, `core/ml_listen.py`): the HAT's ADC
