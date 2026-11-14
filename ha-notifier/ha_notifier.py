@@ -287,6 +287,7 @@ class Slot:
     sent: Optional[str] = None      # last payload HA accepted
     sent_at: float = 0.0
     playing: bool = False           # state of the last payload offered
+    bus: bool = False               # a bus source from ml_listen
 
 
 class Notifier:
@@ -317,6 +318,16 @@ class Notifier:
         key = str(blob.get("source_byte") or blob.get("source"))
         slot = self.slots.setdefault(key, Slot())
         playing = blob.get("state") == "playing"
+        slot.bus = blob.get("origin") == "ml_listen"
+        if slot.bus and playing:
+            # HA shows one bus source at a time: the one playing now
+            # supersedes the others, so neither a keepalive nor a late
+            # "playing" may bring an older one back.
+            for other_key, other in self.slots.items():
+                if other_key != key and other.bus:
+                    other.sent = None
+                    if other.playing:
+                        other.pending = None
         if immediate:
             delay = 0.0
         elif slot.playing and not playing:
