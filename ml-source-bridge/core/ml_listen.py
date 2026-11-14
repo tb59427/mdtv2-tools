@@ -136,6 +136,10 @@ class BusListener:
         self._album_pending = False                  # waiting for MusicBrainz
         self._suspended = False
         self._retry_at = 0.0
+        # (src, name) whose capture died without an idle -- the retry should
+        # pick it up again; if the source changes or stops first, the idle
+        # is still owed.
+        self._owed_idle: Optional[tuple[int, str]] = None
 
         self._am: dict = {}                      # latest state:ml "am" part
         self._am_key: tuple = ()                 # (source, track) of self._am ...
@@ -292,6 +296,8 @@ class BusListener:
         bits = 16 if "16" in self._format else 32
         tap_py = os.path.join(os.path.dirname(os.path.dirname(
             os.path.abspath(__file__))), "providers", "audio_tap.py")
+        if self._owed_idle is not None and self._owed_idle[0] != src:
+            self._publish_owed_idle()
         try:
             # Two processes instead of a shell pipeline: SIGUSR1 ("new
             # track") must reach the tap only -- arecord would die of it.
@@ -326,6 +332,7 @@ class BusListener:
             threading.Thread(target=self._pump_stderr, args=(proc, tag),
                              name=f"ml-listen-{tag}", daemon=True).start()
         self._src, self._src_name, self._track = src, name, track
+        self._owed_idle = None
         self._recognized = None
         self._album_pending = False
         self._silent_since, self._silent = None, False
@@ -338,6 +345,8 @@ class BusListener:
         rec, tap = self._rec, self._tap
         self._rec = self._tap = None
         if rec is None:
+            if publish_idle:
+                self._publish_owed_idle()
             return
         self._kill(tap)
         self._kill(rec)
@@ -348,6 +357,15 @@ class BusListener:
         self._silent_since, self._silent = None, False
         log(f"[listen] stopped listening to {name}")
         if publish_idle and src is not None:
+            self._write(src, self._blob(src, name, state="idle"))
+        elif src is not None:
+            self._owed_idle = (src, name)
+
+    def _publish_owed_idle(self) -> None:
+        """With self._lock held."""
+        if self._owed_idle is not None:
+            src, name = self._owed_idle
+            self._owed_idle = None
             self._write(src, self._blob(src, name, state="idle"))
 
     @staticmethod
